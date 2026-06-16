@@ -346,11 +346,12 @@ function loadDashboard() {
                 card.className = 'ticket-card';
                 card.onclick = () => openDevTimeline(ticket.id, ticket.project_name);
                 
-                let badge = ticket.status === 'RESOLVED' ? `<span class="priority-badge priority-low">RESOLVED</span>` : `<span class="priority-badge ${priorityClass}">${ticket.priority}</span>`;
+                let statusBadge = `<span class="priority-badge" style="background: var(--bg-surface); border: 1px solid var(--border-color);">${ticket.status}</span>`;
+                let priorityBadge = `<span class="priority-badge ${priorityClass}">${ticket.priority}</span>`;
                 
                 card.innerHTML = `
                     <div class="ticket-header">
-                        ${badge}
+                        <div style="display: flex; gap: 5px;">${priorityBadge} ${statusBadge}</div>
                         <span class="team-badge">${ticket.assigned_employee || 'Unassigned'}</span>
                     </div>
                     <div style="margin-bottom: 8px; font-size: 0.8rem; color: var(--text-muted);">
