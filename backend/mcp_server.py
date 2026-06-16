@@ -2,7 +2,7 @@ import mcp.types as types
 from mcp.server import Server
 import json
 import os
-from .database import SessionLocal, Complaint, Customer, Employee, Project, Interaction
+from .database import SessionLocal, Complaint, Customer, Employee, Project, Interaction, AgentMemory
 from datetime import datetime
 
 app = Server("cx-routing-mcp")
@@ -82,6 +82,30 @@ async def list_tools() -> list[types.Tool]:
                     "developer_message": {"type": "string", "description": "Message explaining the delay to the customer"}
                 },
                 "required": ["complaint_id", "new_eta", "developer_message"]
+            }
+        ),
+        types.Tool(
+            name="save_memory",
+            description="Agent tool: Save a persistent memory (e.g. successful troubleshooting steps, developer preferences).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "agent_type": {"type": "string", "description": "'customer', 'supervisor', or 'copilot'"},
+                    "memory_key": {"type": "string", "description": "A short, unique identifier for the memory topic"},
+                    "memory_value": {"type": "string", "description": "The detailed information to remember"}
+                },
+                "required": ["agent_type", "memory_key", "memory_value"]
+            }
+        ),
+        types.Tool(
+            name="recall_memory",
+            description="Agent tool: Retrieve all saved memories for your agent type to help with decision making.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "agent_type": {"type": "string", "description": "'customer', 'supervisor', or 'copilot'"}
+                },
+                "required": ["agent_type"]
             }
         )
     ]
@@ -191,6 +215,23 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             db.commit()
             
             return [types.TextContent(type="text", text=f"Successfully attached the following question to the ticket for the client: '{comp.developer_question}'")]
+            
+        elif name == "save_memory":
+            mem = AgentMemory(
+                agent_type=arguments.get("agent_type"),
+                memory_key=arguments.get("memory_key"),
+                memory_value=arguments.get("memory_value")
+            )
+            db.add(mem)
+            db.commit()
+            return [types.TextContent(type="text", text=f"Successfully saved to {mem.agent_type} memory bank under key '{mem.memory_key}'.")]
+            
+        elif name == "recall_memory":
+            mems = db.query(AgentMemory).filter(AgentMemory.agent_type == arguments.get("agent_type")).all()
+            if not mems:
+                return [types.TextContent(type="text", text="No memories found.")]
+            text = "\n".join([f"Key [{m.memory_key}]: {m.memory_value}" for m in mems])
+            return [types.TextContent(type="text", text=text)]
             
         else:
             raise ValueError(f"Unknown tool: {name}")

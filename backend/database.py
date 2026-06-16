@@ -81,6 +81,15 @@ class Interaction(Base):
     customer = relationship("Customer", back_populates="interactions")
     complaint = relationship("Complaint", back_populates="interactions")
 
+class AgentMemory(Base):
+    __tablename__ = "agent_memories"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    agent_type = Column(String, index=True) # 'customer', 'supervisor', 'copilot'
+    memory_key = Column(String, index=True)
+    memory_value = Column(Text)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     

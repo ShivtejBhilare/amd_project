@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
+from fastapi import FastAPI, Form, Depends, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -35,31 +35,40 @@ def on_startup():
 
 @app.post("/api/complaints")
 async def create_complaint(
-    text: str = Form(...),
+    background_tasks: BackgroundTasks,
     customer_id: int = Form(...),
     project_id: int = Form(...),
+    text: str = Form(...),
     db: Session = Depends(get_db)
 ):
+    comp = Complaint(customer_id=customer_id, project_id=project_id, text_content=text, status="NEW")
+    db.add(comp)
+    db.commit()
+    db.refresh(comp)
+    
+    # Save the initial message to interaction log
+    interaction = Interaction(customer_id=customer_id, complaint_id=comp.id, role="user", content=text)
+    db.add(interaction)
+    db.commit()
+    
     project = db.query(Project).filter(Project.id == project_id).first()
-    project_name = project.name if project else "Unknown"
     
-    complaint = Complaint(customer_id=customer_id, project_id=project_id, text_content=text)
-    db.add(complaint)
-    db.commit()
-    db.refresh(complaint)
+    # Initial Auto-reply / Info gathering
+    agent_result = await customer_agent_flow(comp.id, text, project.name, [])
     
-    interaction_user = Interaction(customer_id=customer_id, complaint_id=complaint.id, role="user", content=text)
-    db.add(interaction_user)
+    # Save agent response
+    agent_msg = Interaction(customer_id=customer_id, complaint_id=comp.id, role="assistant", content=agent_result["reply"])
+    db.add(agent_msg)
     db.commit()
     
-    # 1. Customer Agent Flow
-    agent_result = await customer_agent_flow(complaint.id, text, project_name, [])
+    # Background Task: If it's a new ticket, trigger the Supervisor Agent immediately!
+    async def auto_route_ticket():
+        print(f"Background Task Triggered: Supervisor assigning Ticket #{comp.id}")
+        await supervisor_agent_flow(comp.id, text, project.name)
+
+    background_tasks.add_task(auto_route_ticket)
     
-    interaction_agent = Interaction(customer_id=customer_id, complaint_id=complaint.id, role="assistant", content=agent_result["reply"])
-    db.add(interaction_agent)
-    db.commit()
-    
-    return {"complaint_id": complaint.id, "agent_reply": agent_result["reply"]}
+    return {"complaint_id": comp.id, "status": comp.status, "agent_reply": agent_result["reply"]}
 
 @app.post("/api/chat")
 async def send_chat(
