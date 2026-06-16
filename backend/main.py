@@ -6,7 +6,7 @@ import base64
 import os
 
 from .database import SessionLocal, init_db, Complaint, Customer, Employee, Project, Interaction
-from .agent import customer_agent_flow, supervisor_agent_flow, developer_agent_flow
+from .agent import customer_agent_flow, supervisor_agent_flow, developer_agent_flow, get_model_status
 
 app = FastAPI(title="AMD Multi-Agent CX Engine")
 
@@ -24,6 +24,10 @@ def get_db():
         yield db
     finally:
         db.close()
+
+@app.get("/api/status")
+def api_status():
+    return {"model_status": get_model_status()}
 
 @app.on_event("startup")
 def on_startup():

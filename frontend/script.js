@@ -4,6 +4,7 @@ let activeDevTicketId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadDropdowns();
+    pollModelStatus();
 
     // Elements
     const btnClient = document.getElementById('btn-client-profile');
@@ -223,6 +224,22 @@ function showLoading(containerId) {
 function removeLoading(containerId) {
     const loader = document.getElementById(`loading-${containerId}`);
     if (loader) loader.remove();
+}
+
+async function pollModelStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/status`);
+        const data = await res.json();
+        const banner = document.getElementById('model-status-banner');
+        if (data.model_status === "LOADING" || data.model_status === "UNINITIALIZED") {
+            banner.style.display = "flex";
+            setTimeout(pollModelStatus, 3000);
+        } else {
+            banner.style.display = "none";
+        }
+    } catch (e) {
+        setTimeout(pollModelStatus, 3000);
+    }
 }
 
 async function fetchMyTickets() {

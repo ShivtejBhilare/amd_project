@@ -59,6 +59,14 @@ async def get_chat_model():
     print("AMD ROCm LLM Ready!")
     return _chat_model
 
+def get_model_status():
+    if _chat_model is not None:
+        return "READY"
+    elif _is_loading:
+        return "LOADING"
+    else:
+        return "UNINITIALIZED"
+
 # ----------- Langchain Tool Wrappers for MCP Server -----------
 
 @tool
@@ -100,7 +108,7 @@ async def _run_langchain_agent(system_prompt, tools, chat_history, text):
             return None
             
         def run_agent():
-            from langchain.schema import HumanMessage, SystemMessage, AIMessage
+            from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
             lc_msgs = [SystemMessage(content=system_prompt)]
             for msg in chat_history:
                 if msg["role"] == "user":
@@ -116,8 +124,9 @@ async def _run_langchain_agent(system_prompt, tools, chat_history, text):
         result = await asyncio.to_thread(run_agent)
         return result
     except Exception as e:
-        print(f"Langchain Invoke Error: {e}")
-        return None
+        error_msg = str(e)
+        print(f"Langchain Invoke Error: {error_msg}")
+        return f"LLM_ERROR: {error_msg}"
 
 # -------------- The 3 Agents --------------
 
@@ -147,12 +156,13 @@ Your roles:
 CRITICAL: Be polite and concise. DO NOT expose internal logs or backend architectures."""
     
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, text)
-    if reply:
+    if reply and not reply.startswith("LLM_ERROR:"):
         status = "escalated" if "[RAISE_TICKET]" in reply else "success"
         reply = reply.replace("[RAISE_TICKET]", "").strip()
         return {"status": status, "reply": reply}
         
-    return {"status": "error", "reply": "I'm sorry, our cognitive routing engine is currently experiencing an outage. Please try again in a few minutes."}
+    err = reply.replace("LLM_ERROR:", "").strip() if reply else "Model failed to load."
+    return {"status": "error", "reply": f"Cognitive routing engine outage. Details: {err}"}
 
 async def supervisor_agent_flow(complaint_id: int, text: str, project_name: str):
     """Assigns the ticket and sets priority/eta."""
@@ -170,10 +180,11 @@ Arguments:
 Reply with a summary of your routing decision."""
     
     reply = await _run_langchain_agent(system_prompt, tools, [], text)
-    if reply:
+    if reply and not reply.startswith("LLM_ERROR:"):
         return {"status": "routed", "details": reply}
         
-    return {"status": "error", "details": "Supervisor cognitive engine failed."}
+    err = reply.replace("LLM_ERROR:", "").strip() if reply else "Model failed to load."
+    return {"status": "error", "details": f"Supervisor cognitive engine failed: {err}"}
 
 @tool
 async def lc_request_client_info(complaint_id: int, developer_question: str) -> str:
@@ -194,7 +205,8 @@ Available Actions:
 {ctx}"""
     
     reply = await _run_langchain_agent(system_prompt, tools, [], query)
-    if reply:
+    if reply and not reply.startswith("LLM_ERROR:"):
         return {"status": "success", "reply": reply}
     
-    return {"status": "error", "reply": "Copilot cognitive engine failed to respond."}
+    err = reply.replace("LLM_ERROR:", "").strip() if reply else "Model failed to load."
+    return {"status": "error", "reply": f"Copilot cognitive engine failed: {err}"}
