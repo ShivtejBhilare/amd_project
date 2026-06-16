@@ -35,18 +35,18 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="route_complaint",
-            description="Supervisor tool: Route a complaint to an available engineer based on specialty, set priority and ETA.",
+            description="Supervisor tool: Route a complaint to a specific engineer, set priority and ETA.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "complaint_id": {"type": "integer"},
-                    "specialty_required": {"type": "string"},
+                    "employee_id": {"type": "integer", "description": "The ID of the best employee to solve this issue"},
                     "priority": {"type": "string"},
                     "eta": {"type": "string"},
                     "category": {"type": "string"},
                     "suggested_action": {"type": "string"}
                 },
-                "required": ["complaint_id", "specialty_required", "priority", "eta", "category", "suggested_action"]
+                "required": ["complaint_id", "employee_id", "priority", "eta", "category", "suggested_action"]
             }
         ),
         types.Tool(
@@ -152,8 +152,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             if not complaint:
                 return [types.TextContent(type="text", text="Complaint not found.")]
             
-            specialty = arguments.get("specialty_required", "")
-            engineer = db.query(Employee).filter(Employee.specialty.ilike(f"%{specialty}%"), Employee.is_available == True).first()
+            emp_id = arguments.get("employee_id")
+            engineer = db.query(Employee).filter(Employee.id == emp_id, Employee.is_available == True).first()
             if not engineer:
                 # Fallback to any available engineer
                 engineer = db.query(Employee).filter(Employee.is_available == True).first()
@@ -168,22 +168,22 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 complaint.status = "ASSIGNED"
                 
                 # Log Assignment in Timeline
-                msg = f"System: Ticket has been formally escalated and assigned to {engineer.name} ({specialty}). Priority: {complaint.priority}, ETA: {complaint.eta}."
+                msg = f"System: Ticket has been formally escalated and assigned to {engineer.name} ({engineer.specialty}). Priority: {complaint.priority}, ETA: {complaint.eta}."
                 interaction = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="assistant", content=msg, timestamp=datetime.utcnow())
                 db.add(interaction)
                 
                 db.commit()
-                return [types.TextContent(type="text", text=f"Successfully routed to {engineer.name} ({specialty}).")]
+                return [types.TextContent(type="text", text=f"Successfully routed to {engineer.name}.")]
             else:
                 complaint.status = "NEW"
                 
                 # Log Unassigned Escalation
-                msg = f"System: Ticket has been formally escalated. Waiting for an available engineer specializing in {specialty}. Priority: {complaint.priority}, ETA: {complaint.eta}."
+                msg = f"System: Ticket has been formally escalated. Waiting for an available engineer. Priority: {complaint.priority}, ETA: {complaint.eta}."
                 interaction = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="assistant", content=msg, timestamp=datetime.utcnow())
                 db.add(interaction)
                 
                 db.commit()
-                return [types.TextContent(type="text", text=f"No available engineer found for {specialty}. Kept as NEW but prioritized.")]
+                return [types.TextContent(type="text", text=f"No available engineer found. Kept as NEW but prioritized.")]
                 
         elif name == "search_knowledge_base":
             project_name = arguments.get("project_name", "").lower()

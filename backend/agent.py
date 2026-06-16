@@ -76,9 +76,9 @@ async def lc_check_ticket_status(complaint_id: int) -> str:
     return res[0].text
 
 @tool
-async def lc_route_complaint(complaint_id: int, specialty_required: str, priority: str, eta: str, category: str, suggested_action: str) -> str:
-    """Supervisor tool: Route a complaint to an available engineer based on specialty, set priority and ETA."""
-    args = {"complaint_id": complaint_id, "specialty_required": specialty_required, "priority": priority, "eta": eta, "category": category, "suggested_action": suggested_action}
+async def lc_route_complaint(complaint_id: int, employee_id: int, priority: str, eta: str, category: str, suggested_action: str) -> str:
+    """Supervisor tool: Route a complaint to an available engineer, set priority and ETA."""
+    args = {"complaint_id": complaint_id, "employee_id": employee_id, "priority": priority, "eta": eta, "category": category, "suggested_action": suggested_action}
     res = await mcp_call_tool("route_complaint", args)
     return res[0].text
 
@@ -238,22 +238,39 @@ async def supervisor_agent_flow(complaint_id: int, text: str, project_name: str)
     memory_res = await mcp_call_tool("recall_memory", {"agent_type": "supervisor"})
     memory_context = f"\nYour Routing Memories:\n{memory_res[0].text}\n" if "No memories" not in memory_res[0].text else ""
     
+    try:
+        from .database import SessionLocal, Employee
+        db = SessionLocal()
+        devs = db.query(Employee).filter(Employee.is_available == True).all()
+        dev_list_text = "\n".join([
+            f"ID: {d.id} | Name: {d.name} | Specialty: {d.specialty} | Active Tickets: {len([c for c in d.assigned_complaints if c.status != 'RESOLVED'])}"
+            for d in devs
+        ])
+        db.close()
+    except Exception as e:
+        print("Error fetching dev list:", e)
+        dev_list_text = "No developer info available."
+    
     system_prompt = f"""You are the Supervisor Agent. A ticket has been raised for {project_name}.
 Review the entire conversation timeline of the user's issue: '{text}'.
-You MUST call the lc_route_complaint tool to assign this ticket to a developer IMMEDIATELY.
+You MUST call the lc_route_complaint tool to assign this ticket to the BEST developer available based on the issue context and their current workload.
+
+AVAILABLE DEVELOPERS:
+{dev_list_text}
+
 Arguments:
 - complaint_id: {complaint_id}
-- specialty_required: Pick one: 'Frontend Developer', 'Backend Developer', 'Database Admin', 'Security Analyst'
+- employee_id: The ID of the best developer for this task (e.g., 1, 2, 3...)
 - priority: Assess the intensity of the issue and assign 'LOW', 'MEDIUM', 'HIGH', or 'CRITICAL'.
 - eta: e.g., '2 hours', '1 day'
 - category: A short 2-3 word category.
 - suggested_action: Instructions for the developer based on the context.
 {memory_context}
-You can use lc_save_memory to save patterns or logic (e.g. "If project is Banking App, route to Security Analyst").
+You can use lc_save_memory to save patterns or logic.
 
 Reply with ONLY a JSON object in this exact format:
 {{
-  "specialty_required": "Frontend Developer",
+  "employee_id": 1,
   "priority": "HIGH",
   "eta": "2 hours",
   "category": "UI Bug",
@@ -271,7 +288,7 @@ Do NOT output any markdown or other text."""
         data = json.loads(clean_reply)
         args = {
             "complaint_id": complaint_id,
-            "specialty_required": data.get("specialty_required", "Backend Developer"),
+            "employee_id": data.get("employee_id", 1),
             "priority": data.get("priority", "MEDIUM"),
             "eta": data.get("eta", "TBD"),
             "category": data.get("category", "General"),
