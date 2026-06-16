@@ -95,9 +95,9 @@ async def lc_search_developer_docs(query: str) -> str:
     return res[0].text
 
 @tool
-async def lc_update_ticket(complaint_id: int, new_eta: str, developer_message: str) -> str:
-    """Developer Copilot tool: Update the ETA of a ticket and leave a message for the customer timeline."""
-    args = {"complaint_id": complaint_id, "new_eta": new_eta, "developer_message": developer_message}
+async def lc_update_ticket(complaint_id: int, new_eta: str, new_status: str, developer_message: str) -> str:
+    """Developer Copilot tool: Update the ETA and status of a ticket and leave a message for the customer timeline."""
+    args = {"complaint_id": complaint_id, "new_eta": new_eta, "new_status": new_status, "developer_message": developer_message}
     res = await mcp_call_tool("update_ticket", args)
     return res[0].text
 
@@ -228,7 +228,7 @@ async def lc_request_client_info(complaint_id: int, developer_question: str) -> 
 
 async def developer_agent_flow(query: str, chat_history: list = [], history_text: str = "", ticket_id: int = None):
     """Copilot for developers."""
-    tools = [lc_search_developer_docs, lc_update_ticket, lc_request_client_info, lc_save_memory, lc_recall_memory, lc_get_dashboard_stats]
+    tools = [lc_search_developer_docs, lc_search_knowledge_base, lc_update_ticket, lc_request_client_info, lc_save_memory, lc_recall_memory, lc_get_dashboard_stats]
     ctx = f"\nYou are currently viewing Ticket #{ticket_id}. Customer Timeline:\n{history_text}\n" if ticket_id else ""
     
     memory_res = await mcp_call_tool("recall_memory", {"agent_type": "copilot"})
@@ -237,10 +237,11 @@ async def developer_agent_flow(query: str, chat_history: list = [], history_text
     system_prompt = f"""You are a Developer AI Copilot.
 Available Actions:
 1. Search docs: use lc_search_developer_docs to help the developer.
-2. Update ETA: use lc_update_ticket.
-3. Request Info from Client: If the developer asks you to get more information from the client, you MUST use the lc_request_client_info tool.
-4. View Dashboard Stats: Use lc_get_dashboard_stats to fetch pending tickets, priorities, and idle developers.
-5. Learn: Use lc_save_memory to save developer preferences (e.g. what frameworks they use) so you can recall them later.
+2. Search SRS Knowledge Base: use lc_search_knowledge_base to check the project requirements (pass 'project_name').
+3. Update Ticket: use lc_update_ticket to update the ticket ETA and status (e.g. 'IN PROGRESS', 'RESOLVED').
+4. Request Info from Client: If the developer asks you to get more information from the client, you MUST use the lc_request_client_info tool.
+5. View Dashboard Stats: Use lc_get_dashboard_stats to fetch pending tickets, priorities, and idle developers.
+6. Learn: Use lc_save_memory to save developer preferences (e.g. what frameworks they use) so you can recall them later.
 {memory_context}{ctx}"""
     
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, query)

@@ -73,15 +73,16 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="update_ticket",
-            description="Developer Copilot tool: Update the ETA of a ticket and leave a message for the customer timeline.",
+            description="Developer Copilot tool: Update the ETA and status of a ticket and leave a message for the customer timeline.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "complaint_id": {"type": "integer"},
                     "new_eta": {"type": "string", "description": "The new estimated time to resolution (e.g. '2 days')"},
-                    "developer_message": {"type": "string", "description": "Message explaining the delay to the customer"}
+                    "new_status": {"type": "string", "description": "Update the status to 'IN PROGRESS', 'RESOLVED', etc."},
+                    "developer_message": {"type": "string", "description": "Message explaining the delay or update to the customer"}
                 },
-                "required": ["complaint_id", "new_eta", "developer_message"]
+                "required": ["complaint_id", "new_eta", "new_status", "developer_message"]
             }
         ),
         types.Tool(
@@ -139,8 +140,11 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             if not complaint:
                 return [types.TextContent(type="text", text="Complaint not found.")]
             
-            specialty = arguments.get("specialty_required")
-            engineer = db.query(Employee).filter(Employee.specialty == specialty, Employee.is_available == True).first()
+            specialty = arguments.get("specialty_required", "")
+            engineer = db.query(Employee).filter(Employee.specialty.ilike(f"%{specialty}%"), Employee.is_available == True).first()
+            if not engineer:
+                # Fallback to any available engineer
+                engineer = db.query(Employee).filter(Employee.is_available == True).first()
             
             complaint.priority = arguments.get("priority")
             complaint.eta = arguments.get("eta")
@@ -203,13 +207,14 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             if not comp: return [types.TextContent(type="text", text="Complaint not found.")]
             
             comp.eta = arguments.get("new_eta")
+            comp.status = arguments.get("new_status", comp.status)
             
             msg = f"Developer Update: {arguments.get('developer_message')}"
             interaction = Interaction(customer_id=comp.customer_id, complaint_id=comp.id, role="assistant", content=msg, timestamp=datetime.utcnow())
             db.add(interaction)
             db.commit()
             
-            return [types.TextContent(type="text", text=f"Ticket {comp.id} successfully updated. ETA is now {comp.eta}. Message added to timeline.")]
+            return [types.TextContent(type="text", text=f"Ticket {comp.id} successfully updated. ETA is now {comp.eta}. Status is {comp.status}. Message added to timeline.")]
 
         elif name == "request_client_info":
             comp_id = arguments.get("complaint_id")
