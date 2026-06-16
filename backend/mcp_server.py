@@ -22,6 +22,18 @@ async def list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="request_client_info",
+            description="Developer Copilot tool: Leave a question on the ticket for the customer agent to ask the client. Use this when the developer needs more info.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "complaint_id": {"type": "integer"},
+                    "developer_question": {"type": "string", "description": "The exact question to ask the customer"}
+                },
+                "required": ["complaint_id", "developer_question"]
+            }
+        ),
+        types.Tool(
             name="route_complaint",
             description="Supervisor tool: Route a complaint to an available engineer based on specialty, set priority and ETA.",
             inputSchema={
@@ -82,7 +94,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             comp = db.query(Complaint).filter(Complaint.id == arguments.get("complaint_id")).first()
             if not comp: return [types.TextContent(type="text", text="Complaint not found.")]
             emp_name = comp.assigned_employee.name if comp.assigned_employee else "Unassigned"
-            text = f"Status: {comp.status}, Assigned To: {emp_name}, Priority: {comp.priority}, ETA: {comp.eta}"
+            
+            text = f"Status: {comp.status}\nAssigned To: {emp_name}\nPriority: {comp.priority}\nETA: {comp.eta}\nTasks Assigned: {comp.suggested_action}"
+            if comp.developer_question:
+                text += f"\n\nDEVELOPER REQUEST: The developer has asked for the following information: '{comp.developer_question}'. Please ask the client for this information."
             return [types.TextContent(type="text", text=text)]
             
         elif name == "route_complaint":
@@ -102,10 +117,22 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             if engineer:
                 complaint.employee_id = engineer.id
                 complaint.status = "ASSIGNED"
+                
+                # Log Assignment in Timeline
+                msg = f"System: Ticket has been formally escalated and assigned to {engineer.name} ({specialty}). Priority: {complaint.priority}, ETA: {complaint.eta}."
+                interaction = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="assistant", content=msg, timestamp=datetime.utcnow())
+                db.add(interaction)
+                
                 db.commit()
                 return [types.TextContent(type="text", text=f"Successfully routed to {engineer.name} ({specialty}).")]
             else:
                 complaint.status = "NEW"
+                
+                # Log Unassigned Escalation
+                msg = f"System: Ticket has been formally escalated. Waiting for an available engineer specializing in {specialty}. Priority: {complaint.priority}, ETA: {complaint.eta}."
+                interaction = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="assistant", content=msg, timestamp=datetime.utcnow())
+                db.add(interaction)
+                
                 db.commit()
                 return [types.TextContent(type="text", text=f"No available engineer found for {specialty}. Kept as NEW but prioritized.")]
                 
@@ -150,6 +177,20 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             db.commit()
             
             return [types.TextContent(type="text", text=f"Ticket {comp.id} successfully updated. ETA is now {comp.eta}. Message added to timeline.")]
+
+        elif name == "request_client_info":
+            comp_id = arguments.get("complaint_id")
+            comp = db.query(Complaint).filter(Complaint.id == comp_id).first()
+            if not comp: return [types.TextContent(type="text", text="Complaint not found.")]
+            
+            comp.developer_question = arguments.get("developer_question")
+            
+            msg = f"Developer Notice: Waiting on customer to provide information regarding: {comp.developer_question}"
+            interaction = Interaction(customer_id=comp.customer_id, complaint_id=comp.id, role="assistant", content=msg, timestamp=datetime.utcnow())
+            db.add(interaction)
+            db.commit()
+            
+            return [types.TextContent(type="text", text=f"Successfully attached the following question to the ticket for the client: '{comp.developer_question}'")]
             
         else:
             raise ValueError(f"Unknown tool: {name}")

@@ -58,6 +58,7 @@ class Complaint(Base):
     eta = Column(String, nullable=True) # e.g. '2-4 hours'
     
     suggested_action = Column(Text, nullable=True)
+    developer_question = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

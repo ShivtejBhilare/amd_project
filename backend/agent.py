@@ -42,7 +42,7 @@ async def get_chat_model():
                 "text-generation",
                 model=model,
                 tokenizer=tokenizer,
-                max_new_tokens=512,
+                max_new_tokens=1024,
                 max_length=None,
                 temperature=0.1,
                 return_full_text=False
@@ -122,66 +122,79 @@ async def _run_langchain_agent(system_prompt, tools, chat_history, text):
 # -------------- The 3 Agents --------------
 
 async def customer_agent_flow(complaint_id: int, text: str, project_name: str, chat_history: list):
-    """Handles direct customer chat."""
+    """Information Gathering & Status Agent for the Customer."""
     tools = [lc_check_ticket_status, lc_search_knowledge_base]
-    system_prompt = f"""You are a Customer Agent for {project_name}. 
-If the user asks for ticket updates, use lc_check_ticket_status with ID {complaint_id}. 
-If they have an issue, use lc_search_knowledge_base to find solutions.
-CRITICAL RULE: When responding to the customer, be polite and helpful. NEVER expose internal developer instructions, API logs, backend architectures, or technical jargon to the customer. You must rephrase internal knowledge base docs into friendly, customer-facing advice.
-If the provided solutions do not work or the issue is severe, you must explicitly say "[ESCALATE]" in your message to notify the supervisor. Otherwise, do not say it."""
     
-    # Try the real AMD model
+    # Check if there is an active developer request
+    try:
+        from .database import SessionLocal, Complaint
+        db = SessionLocal()
+        comp = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+        dev_question = comp.developer_question if comp else None
+        db.close()
+    except:
+        dev_question = None
+
+    dev_context = f"\nCRITICAL: The developer has explicitly asked for this information: '{dev_question}'. You MUST ask the customer this exact question and wait for their reply." if dev_question else ""
+    
+    system_prompt = f"""You are the Customer Support Agent for {project_name}. 
+Your roles:
+1. GATHER INFO: Ask clarifying questions about their issue.
+2. TROUBLESHOOT: Use lc_search_knowledge_base to find solutions.
+3. ESCALATE: If the provided solutions do not work or the issue is severe, explicitly say "[RAISE_TICKET]" in your message.
+4. STATUS UPDATE: If they ask for an update, ETA, or task assignment, use lc_check_ticket_status and explain the status nicely.
+{dev_context}
+CRITICAL: Be polite and concise. DO NOT expose internal logs or backend architectures."""
+    
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, text)
     if reply:
-        status = "escalated" if "[ESCALATE]" in reply else "success"
-        reply = reply.replace("[ESCALATE]", "").strip()
+        status = "escalated" if "[RAISE_TICKET]" in reply else "success"
+        reply = reply.replace("[RAISE_TICKET]", "").strip()
         return {"status": status, "reply": reply}
         
-    # Mock fallback if model fails to load
-    if "update" in text.lower() or "status" in text.lower() or "eta" in text.lower():
-        res = await mcp_call_tool("check_ticket_status", {"complaint_id": complaint_id})
-        return {"status": "success", "reply": f"Checking your ticket... {res[0].text}"}
-    elif len(chat_history) > 0 and ("not work" in text.lower() or "didn't" in text.lower()):
-        return {"status": "escalated", "reply": "I see the steps didn't work. I am escalating this to my Supervisor immediately."}
-    else:
-        res = await mcp_call_tool("search_knowledge_base", {"project_name": project_name})
-        return {"status": "success", "reply": f"Based on our docs for {project_name}:\n{res[0].text[:300]}..."}
+    return {"status": "error", "reply": "I'm sorry, our cognitive routing engine is currently experiencing an outage. Please try again in a few minutes."}
 
 async def supervisor_agent_flow(complaint_id: int, text: str, project_name: str):
-    """Assigns the ticket and sets priority/eta in the background."""
-    # Fast mock fallback for supervisor to avoid waiting on LLM for background routing
-    if "security" in text.lower() or "2fa" in text.lower() or "bypass" in text.lower():
-        specialty, priority, eta = "Security Analyst", "CRITICAL", "1 hour"
-    elif "db" in text.lower() or "query" in text.lower() or "database" in text.lower():
-        specialty, priority, eta = "Database Admin", "HIGH", "4 hours"
-    elif "timeout" in text.lower() or "backend" in text.lower() or "upload" in text.lower() or "s3" in text.lower():
-        specialty, priority, eta = "Backend Developer", "HIGH", "24 hours"
-    else:
-        specialty, priority, eta = "Frontend Developer", "MEDIUM", "2 days"
+    """Assigns the ticket and sets priority/eta."""
+    tools = [lc_route_complaint]
+    system_prompt = f"""You are the Supervisor Agent. A ticket has been raised for {project_name}.
+Review the user's issue: '{text}'.
+You MUST call the lc_route_complaint tool to assign this ticket.
+Arguments:
+- complaint_id: {complaint_id}
+- specialty_required: Pick one: 'Frontend Developer', 'Backend Developer', 'Database Admin', 'Security Analyst'
+- priority: 'LOW', 'MEDIUM', 'HIGH', or 'CRITICAL'
+- eta: e.g., '2 hours', '1 day'
+- category: A short 2-3 word category.
+- suggested_action: Instructions for the developer based on the context.
+Reply with a summary of your routing decision."""
+    
+    reply = await _run_langchain_agent(system_prompt, tools, [], text)
+    if reply:
+        return {"status": "routed", "details": reply}
         
-    args = {"complaint_id": complaint_id, "specialty_required": specialty, "priority": priority, "eta": eta, "category": "Escalated", "suggested_action": "Review chat and implement fix."}
-    await mcp_call_tool("route_complaint", args)
-    return {"status": "routed", "details": args}
+    return {"status": "error", "details": "Supervisor cognitive engine failed."}
+
+@tool
+async def lc_request_client_info(complaint_id: int, developer_question: str) -> str:
+    """Developer Copilot tool: Leave a question on the ticket for the customer agent to ask the client. Use this when the developer needs more info."""
+    args = {"complaint_id": complaint_id, "developer_question": developer_question}
+    res = await mcp_call_tool("request_client_info", args)
+    return res[0].text
 
 async def developer_agent_flow(query: str, history_text: str = "", ticket_id: int = None):
     """Copilot for developers."""
-    tools = [lc_search_developer_docs, lc_update_ticket]
+    tools = [lc_search_developer_docs, lc_update_ticket, lc_request_client_info]
     ctx = f"\nYou are currently viewing Ticket #{ticket_id}. Timeline:\n{history_text}\n" if ticket_id else ""
-    system_prompt = f"You are a Developer AI Copilot. You can search developer docs. If the developer tells you to update a ticket ETA and notify the customer, you MUST extract the ticket ID and use the lc_update_ticket tool.{ctx}"
+    system_prompt = f"""You are a Developer AI Copilot.
+Available Actions:
+1. Search docs: use lc_search_developer_docs to help the developer.
+2. Update ETA: use lc_update_ticket.
+3. Request Info from Client: If the developer asks you to get more information from the client, you MUST use the lc_request_client_info tool. The Customer Agent will automatically relay your question to the client!
+{ctx}"""
     
-    # Try the real AMD Model
     reply = await _run_langchain_agent(system_prompt, tools, [], query)
     if reply:
         return {"status": "success", "reply": reply}
     
-    # Mock fallback
-    if "eta" in query.lower() or "update" in query.lower() or "ticket" in query.lower():
-        # Fallback regex mock parsing
-        import re
-        match = re.search(r"ticket\s*(\d+)", query.lower())
-        cid = int(match.group(1)) if match else 1
-        res = await mcp_call_tool("update_ticket", {"complaint_id": cid, "new_eta": "Updated by Developer", "developer_message": query})
-        return {"status": "success", "reply": f"Copilot Action Completed: {res[0].text}"}
-            
-    res = await mcp_call_tool("search_developer_docs", {"query": query})
-    return {"status": "success", "reply": f"**Dev Copilot found:**\n{res[0].text}"}
+    return {"status": "error", "reply": "Copilot cognitive engine failed to respond."}
