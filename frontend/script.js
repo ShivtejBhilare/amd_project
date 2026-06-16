@@ -226,20 +226,41 @@ function removeLoading(containerId) {
     if (loader) loader.remove();
 }
 
+let previousModelStatus = "UNINITIALIZED";
+
 async function pollModelStatus() {
     try {
         const res = await fetch(`${API_BASE}/status`);
         const data = await res.json();
         const banner = document.getElementById('model-status-banner');
+        
+        if (data.model_status === "READY" && previousModelStatus === "LOADING") {
+            showToast("✅ Backend LLM Loaded Successfully!", "success");
+        }
+        
         if (data.model_status === "LOADING" || data.model_status === "UNINITIALIZED") {
             banner.style.display = "flex";
             setTimeout(pollModelStatus, 3000);
         } else {
             banner.style.display = "none";
         }
+        previousModelStatus = data.model_status;
     } catch (e) {
         setTimeout(pollModelStatus, 3000);
     }
+}
+
+function showToast(message, type) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerText = message;
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 500);
+    }, 3000);
 }
 
 async function fetchMyTickets() {

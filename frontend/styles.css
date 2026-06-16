@@ -24,6 +24,10 @@ body {
 
 .status-banner { background-color: #f59e0b; color: white; padding: 10px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.9rem; z-index: 1000; position: relative; }
 
+.toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
+.toast { padding: 12px 20px; border-radius: 8px; color: white; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.15); transition: opacity 0.5s ease; }
+.toast-success { background-color: var(--priority-low); }
+
 .app-container { display: flex; height: 100vh; overflow: hidden; }
 
 /* Sidebar */
