@@ -2,6 +2,9 @@ const API_BASE = "/api";
 let activeComplaintId = null;
 let activeDevTicketId = null;
 
+let globalCopilotHistory = [];
+let modalCopilotHistory = [];
+
 document.addEventListener('DOMContentLoaded', () => {
     loadDropdowns();
     pollModelStatus();
@@ -120,6 +123,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const fd = new FormData();
         fd.append('query', text);
+        fd.append('chat_history', JSON.stringify(globalCopilotHistory));
+        
+        globalCopilotHistory.push({"role": "user", "content": text});
 
         showLoading('copilot-history');
         try {
@@ -127,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             removeLoading('copilot-history');
             appendBubble('copilot-history', 'assistant', data.reply);
+            globalCopilotHistory.push({"role": "assistant", "content": data.reply});
         } catch(e) { removeLoading('copilot-history'); }
     });
 
@@ -143,9 +150,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const fd = new FormData();
         fd.append('query', text);
+        fd.append('chat_history', JSON.stringify(modalCopilotHistory));
         if (activeDevTicketId) {
             fd.append('ticket_id', activeDevTicketId);
         }
+        
+        modalCopilotHistory.push({"role": "user", "content": text});
 
         showLoading('modal-copilot-history');
         try {
@@ -153,6 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             removeLoading('modal-copilot-history');
             appendBubble('modal-copilot-history', 'assistant', data.reply);
+            modalCopilotHistory.push({"role": "assistant", "content": data.reply});
             
             // Refresh timeline in case Copilot updated the ETA
             openDevTimeline(activeDevTicketId, document.getElementById('modal-ticket-title').textContent.split(' - ')[1]);
@@ -354,6 +365,7 @@ function loadDashboard() {
 
 async function openDevTimeline(ticketId, projectName) {
     activeDevTicketId = ticketId;
+    modalCopilotHistory = []; // Reset modal copilot history for new ticket
     const modal = document.getElementById('timeline-modal');
     const timelineBox = document.getElementById('modal-timeline');
     document.getElementById('modal-ticket-title').textContent = `Ticket #${ticketId} Timeline - ${projectName}`;

@@ -124,13 +124,13 @@ async def _run_langchain_agent(system_prompt, tools, chat_history, text):
             from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
             lc_msgs = [SystemMessage(content=system_prompt)]
             for msg in chat_history:
-                if msg["role"] == "user":
+                role = msg.get("role", "")
+                if role == "user":
                     lc_msgs.append(HumanMessage(content=msg["content"]))
-                else:
+                elif role == "assistant":
                     lc_msgs.append(AIMessage(content=msg["content"]))
             lc_msgs.append(HumanMessage(content=text))
             
-            # Direct invocation without AgentExecutor
             res = chat_model.invoke(lc_msgs)
             return res.content
             
@@ -163,15 +163,18 @@ async def customer_agent_flow(complaint_id: int, text: str, project_name: str, c
     memory_res = await mcp_call_tool("recall_memory", {"agent_type": "customer"})
     memory_context = f"\nYour Saved Memories:\n{memory_res[0].text}\n" if "No memories" not in memory_res[0].text else ""
     
-    system_prompt = f"""You are the Customer Support Agent for {project_name}. 
+system_prompt = f"""You are the Customer Support Agent for {project_name}. 
 Your roles:
 1. GATHER INFO: Ask clarifying questions about their issue.
 2. TROUBLESHOOT: Use lc_search_knowledge_base to find solutions.
-3. ESCALATE: If the provided solutions do not work or the issue is severe, explicitly say "[RAISE_TICKET]" in your message.
+3. ESCALATE: If the provided solutions do not work or the issue is severe, explicitly say "[RAISE_TICKET]" in your message AND write a polite message telling the user you are assigning a developer to help them! Do not just output the tag.
 4. STATUS UPDATE: If they ask for an update, ETA, or task assignment, use lc_check_ticket_status and explain the status nicely.
 5. LEARN: If a user confirms a troubleshooting step solved their problem, use lc_save_memory to save it so you don't need to check the KB next time!
 {memory_context}{dev_context}
-CRITICAL: Be polite and concise. DO NOT expose internal logs or backend architectures."""
+CRITICAL RULES:
+- Be polite and concise.
+- NEVER expose internal logs, backend architectures, or API details.
+- NEVER ask the customer technical questions like "check your code", "check the database", or "check the API logs". Assume the customer is non-technical!"""
     
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, text)
     if reply and not reply.startswith("LLM_ERROR:"):
@@ -190,12 +193,12 @@ async def supervisor_agent_flow(complaint_id: int, text: str, project_name: str)
     memory_context = f"\nYour Routing Memories:\n{memory_res[0].text}\n" if "No memories" not in memory_res[0].text else ""
     
     system_prompt = f"""You are the Supervisor Agent. A ticket has been raised for {project_name}.
-Review the user's issue: '{text}'.
-You MUST call the lc_route_complaint tool to assign this ticket.
+Review the entire conversation timeline of the user's issue: '{text}'.
+You MUST call the lc_route_complaint tool to assign this ticket to a developer IMMEDIATELY.
 Arguments:
 - complaint_id: {complaint_id}
 - specialty_required: Pick one: 'Frontend Developer', 'Backend Developer', 'Database Admin', 'Security Analyst'
-- priority: 'LOW', 'MEDIUM', 'HIGH', or 'CRITICAL'
+- priority: Assess the intensity of the issue and assign 'LOW', 'MEDIUM', 'HIGH', or 'CRITICAL'.
 - eta: e.g., '2 hours', '1 day'
 - category: A short 2-3 word category.
 - suggested_action: Instructions for the developer based on the context.
@@ -217,10 +220,10 @@ async def lc_request_client_info(complaint_id: int, developer_question: str) -> 
     res = await mcp_call_tool("request_client_info", args)
     return res[0].text
 
-async def developer_agent_flow(query: str, history_text: str = "", ticket_id: int = None):
+async def developer_agent_flow(query: str, chat_history: list = [], history_text: str = "", ticket_id: int = None):
     """Copilot for developers."""
     tools = [lc_search_developer_docs, lc_update_ticket, lc_request_client_info, lc_save_memory, lc_recall_memory]
-    ctx = f"\nYou are currently viewing Ticket #{ticket_id}. Timeline:\n{history_text}\n" if ticket_id else ""
+    ctx = f"\nYou are currently viewing Ticket #{ticket_id}. Customer Timeline:\n{history_text}\n" if ticket_id else ""
     
     memory_res = await mcp_call_tool("recall_memory", {"agent_type": "copilot"})
     memory_context = f"\nYour Saved Dev Preferences & Notes:\n{memory_res[0].text}\n" if "No memories" not in memory_res[0].text else ""
@@ -233,7 +236,7 @@ Available Actions:
 4. Learn: Use lc_save_memory to save developer preferences (e.g. what frameworks they use) so you can recall them later.
 {memory_context}{ctx}"""
     
-    reply = await _run_langchain_agent(system_prompt, tools, [], query)
+    reply = await _run_langchain_agent(system_prompt, tools, chat_history, query)
     if reply and not reply.startswith("LLM_ERROR:"):
         return {"status": "success", "reply": reply}
     

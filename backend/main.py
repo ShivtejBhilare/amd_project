@@ -61,10 +61,11 @@ async def create_complaint(
     db.add(agent_msg)
     db.commit()
     
-    # Background Task: If it's a new ticket, trigger the Supervisor Agent immediately!
+    # Background Task: Trigger Supervisor Agent
     async def auto_route_ticket():
         print(f"Background Task Triggered: Supervisor assigning Ticket #{comp.id}")
-        await supervisor_agent_flow(comp.id, text, project.name)
+        transcript = f"Customer: {text}"
+        await supervisor_agent_flow(comp.id, transcript, project.name)
 
     background_tasks.add_task(auto_route_ticket)
     
@@ -95,7 +96,9 @@ async def send_chat(
     
     # 2. If escalated, trigger Supervisor Agent in background
     if agent_result["status"] == "escalated":
-        await supervisor_agent_flow(complaint.id, text, project_name)
+        history = db.query(Interaction).filter(Interaction.complaint_id == complaint_id).order_by(Interaction.timestamp.asc()).all()
+        transcript = "\n".join([f"{i.role}: {i.content}" for i in history])
+        await supervisor_agent_flow(complaint.id, transcript, project_name)
     
     agent_msg = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="assistant", content=agent_result["reply"])
     db.add(agent_msg)
@@ -106,16 +109,23 @@ async def send_chat(
 @app.post("/api/developer_chat")
 async def dev_chat(
     query: str = Form(...),
+    chat_history: str = Form("[]"),
     ticket_id: int = Form(None),
     db: Session = Depends(get_db)
 ):
+    import json
+    try:
+        parsed_history = json.loads(chat_history)
+    except:
+        parsed_history = []
+        
     history_text = ""
     if ticket_id:
         history = db.query(Interaction).filter(Interaction.complaint_id == ticket_id).order_by(Interaction.timestamp.asc()).all()
         history_text = "\n".join([f"{i.role}: {i.content}" for i in history])
         
     # Developer Copilot Agent Flow
-    result = await developer_agent_flow(query, history_text, ticket_id)
+    result = await developer_agent_flow(query, parsed_history, history_text, ticket_id)
     return {"reply": result["reply"]}
 
 @app.get("/api/customer/tickets/{customer_id}")
@@ -138,8 +148,15 @@ async def assign_backlog(background_tasks: BackgroundTasks, db: Session = Depend
     async def process_backlog(tickets):
         for comp in tickets:
             project_name = comp.project.name if comp.project else "Unknown"
+            
+            # Fetch the entire conversation history for this ticket to give the Supervisor full context
+            history = db.query(Interaction).filter(Interaction.complaint_id == comp.id).order_by(Interaction.timestamp.asc()).all()
+            transcript = "\n".join([f"{i.role}: {i.content}" for i in history])
+            if not transcript:
+                transcript = f"Customer: {comp.text_content}"
+                
             print(f"Sweeping Backlog: Assigning Ticket #{comp.id}")
-            await supervisor_agent_flow(comp.id, comp.text_content, project_name)
+            await supervisor_agent_flow(comp.id, transcript, project_name)
             
     if count > 0:
         background_tasks.add_task(process_backlog, unassigned)
