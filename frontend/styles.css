@@ -71,7 +71,11 @@ header p { color: var(--text-muted); font-size: 1rem; }
 .form-group { margin-bottom: 1.5rem; }
 label { display: block; margin-bottom: 0.5rem; font-weight: 600; color: #E0E0E0; }
 input, select, textarea { width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.8rem 1rem; color: var(--text-main); font-size: 1rem; }
+select option { background-color: var(--bg-dark); color: var(--text-main); }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary-color); }
+
+.chat-bubble p { margin-bottom: 0.5rem; }
+.chat-bubble pre { background: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 4px; overflow-x: auto; margin-bottom: 0.5rem; }
 
 .primary-btn { background: var(--primary-color); color: white; border: none; padding: 1rem 2rem; border-radius: 8px; font-weight: 600; cursor: pointer; width: 100%; transition: 0.3s; }
 .primary-btn:hover { background: var(--primary-hover); }

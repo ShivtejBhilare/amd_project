@@ -121,7 +121,16 @@
             <div class="modal-content">
                 <span class="close-modal">&times;</span>
                 <h2 id="modal-ticket-title">Ticket Timeline</h2>
-                <div class="chat-history" id="modal-timeline" style="margin-top: 1rem; max-height: 400px;"></div>
+                <div class="chat-history" id="modal-timeline" style="margin-top: 1rem; max-height: 300px;"></div>
+                
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                    <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--primary-medium);">Ticket Copilot</h3>
+                    <div class="chat-history" id="modal-copilot-history" style="max-height: 150px; margin-bottom: 0.5rem; display: none;"></div>
+                    <form id="modal-copilot-form" class="chat-input-area" style="padding: 0; border: none;">
+                        <input type="text" id="modal-copilot-message" placeholder="Ask Copilot about this ticket..." required>
+                        <button type="submit" class="primary-btn" style="width: auto;">Ask Copilot</button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>

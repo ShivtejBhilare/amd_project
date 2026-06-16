@@ -9,7 +9,7 @@ from langchain.tools import tool
 
 from .mcp_server import list_tools as mcp_list_tools, call_tool as mcp_call_tool
 
-MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
+MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-14B-Instruct")
 
 # Lazy Loaded Native AMD ROCm Pipeline
 _tokenizer = None
@@ -127,12 +127,15 @@ async def customer_agent_flow(complaint_id: int, text: str, project_name: str, c
     system_prompt = f"""You are a Customer Agent for {project_name}. 
 If the user asks for ticket updates, use lc_check_ticket_status with ID {complaint_id}. 
 If they have an issue, use lc_search_knowledge_base to find solutions.
-CRITICAL RULE: When responding to the customer, be polite and helpful. NEVER expose internal developer instructions, API logs, backend architectures, or technical jargon to the customer. You must rephrase internal knowledge base docs into friendly, customer-facing advice."""
+CRITICAL RULE: When responding to the customer, be polite and helpful. NEVER expose internal developer instructions, API logs, backend architectures, or technical jargon to the customer. You must rephrase internal knowledge base docs into friendly, customer-facing advice.
+If the provided solutions do not work or the issue is severe, you must explicitly say "[ESCALATE]" in your message to notify the supervisor. Otherwise, do not say it."""
     
     # Try the real AMD model
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, text)
     if reply:
-        return {"status": "success", "reply": reply}
+        status = "escalated" if "[ESCALATE]" in reply else "success"
+        reply = reply.replace("[ESCALATE]", "").strip()
+        return {"status": status, "reply": reply}
         
     # Mock fallback if model fails to load
     if "update" in text.lower() or "status" in text.lower() or "eta" in text.lower():
@@ -160,10 +163,11 @@ async def supervisor_agent_flow(complaint_id: int, text: str, project_name: str)
     await mcp_call_tool("route_complaint", args)
     return {"status": "routed", "details": args}
 
-async def developer_agent_flow(query: str):
+async def developer_agent_flow(query: str, history_text: str = "", ticket_id: int = None):
     """Copilot for developers."""
     tools = [lc_search_developer_docs, lc_update_ticket]
-    system_prompt = "You are a Developer AI Copilot. You can search developer docs. If the developer tells you to update a ticket ETA and notify the customer, you MUST extract the ticket ID and use the lc_update_ticket tool."
+    ctx = f"\nYou are currently viewing Ticket #{ticket_id}. Timeline:\n{history_text}\n" if ticket_id else ""
+    system_prompt = f"You are a Developer AI Copilot. You can search developer docs. If the developer tells you to update a ticket ETA and notify the customer, you MUST extract the ticket ID and use the lc_update_ticket tool.{ctx}"
     
     # Try the real AMD Model
     reply = await _run_langchain_agent(system_prompt, tools, [], query)

@@ -91,9 +91,18 @@ async def send_chat(
     return {"status": "success", "agent_reply": agent_result["reply"]}
 
 @app.post("/api/developer_chat")
-async def dev_chat(query: str = Form(...)):
+async def dev_chat(
+    query: str = Form(...),
+    ticket_id: int = Form(None),
+    db: Session = Depends(get_db)
+):
+    history_text = ""
+    if ticket_id:
+        history = db.query(Interaction).filter(Interaction.complaint_id == ticket_id).order_by(Interaction.timestamp.asc()).all()
+        history_text = "\n".join([f"{i.role}: {i.content}" for i in history])
+        
     # Developer Copilot Agent Flow
-    result = await developer_agent_flow(query)
+    result = await developer_agent_flow(query, history_text, ticket_id)
     return {"reply": result["reply"]}
 
 @app.get("/api/customer/tickets/{customer_id}")

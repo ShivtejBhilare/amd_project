@@ -1,5 +1,6 @@
 const API_BASE = "/api";
 let activeComplaintId = null;
+let activeDevTicketId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadDropdowns();
@@ -95,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchMyTickets(); // Refresh statuses
     });
 
-    // Copilot Chat
+    // Global Copilot Chat
     document.getElementById('copilot-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const textInput = document.getElementById('copilot-message');
@@ -109,6 +110,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const res = await fetch(`${API_BASE}/developer_chat`, { method: 'POST', body: fd });
         const data = await res.json();
         appendBubble('copilot-history', 'assistant', data.reply);
+    });
+
+    // Modal Ticket Copilot Chat
+    document.getElementById('modal-copilot-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const historyBox = document.getElementById('modal-copilot-history');
+        historyBox.style.display = 'flex';
+        
+        const textInput = document.getElementById('modal-copilot-message');
+        const text = textInput.value;
+        textInput.value = '';
+        appendBubble('modal-copilot-history', 'user', text);
+
+        const fd = new FormData();
+        fd.append('query', text);
+        if (activeDevTicketId) {
+            fd.append('ticket_id', activeDevTicketId);
+        }
+
+        const res = await fetch(`${API_BASE}/developer_chat`, { method: 'POST', body: fd });
+        const data = await res.json();
+        appendBubble('modal-copilot-history', 'assistant', data.reply);
+        
+        // Refresh timeline in case Copilot updated the ETA
+        openDevTimeline(activeDevTicketId, document.getElementById('modal-ticket-title').textContent.split(' - ')[1]);
     });
 
     // Dashboard
@@ -240,9 +266,13 @@ function loadDashboard() {
 }
 
 async function openDevTimeline(ticketId, projectName) {
+    activeDevTicketId = ticketId;
     const modal = document.getElementById('timeline-modal');
     const timelineBox = document.getElementById('modal-timeline');
     document.getElementById('modal-ticket-title').textContent = `Ticket #${ticketId} Timeline - ${projectName}`;
+    
+    document.getElementById('modal-copilot-history').innerHTML = '';
+    document.getElementById('modal-copilot-history').style.display = 'none';
     
     timelineBox.innerHTML = 'Loading...';
     modal.style.display = 'block';
