@@ -163,7 +163,7 @@ async def customer_agent_flow(complaint_id: int, text: str, project_name: str, c
     memory_res = await mcp_call_tool("recall_memory", {"agent_type": "customer"})
     memory_context = f"\nYour Saved Memories:\n{memory_res[0].text}\n" if "No memories" not in memory_res[0].text else ""
     
-system_prompt = f"""You are the Customer Support Agent for {project_name}. 
+    system_prompt = f"""You are the Customer Support Agent for {project_name}. 
 Your roles:
 1. GATHER INFO: Ask clarifying questions about their issue.
 2. TROUBLESHOOT: Use lc_search_knowledge_base to find solutions.
