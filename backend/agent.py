@@ -2,10 +2,12 @@ import os
 import json
 import asyncio
 import torch
+
+# D drive likely has more space, C drive is out of memory/disk!
+os.environ["HF_HOME"] = "D:\\amd\\hf_cache"
+
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
-from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain.prompts import ChatPromptTemplate
 from langchain.tools import tool
 
 from .mcp_server import list_tools as mcp_list_tools, call_tool as mcp_call_tool
@@ -100,23 +102,24 @@ async def _run_langchain_agent(system_prompt, tools, chat_history, text):
         if not chat_model:
             return None
             
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            *[(msg["role"], msg["content"]) for msg in chat_history],
-            ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}")
-        ])
-        
-        agent = create_tool_calling_agent(chat_model, tools, prompt)
-        agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-        
         def run_agent():
-            return agent_executor.invoke({"input": text})
+            from langchain.schema import HumanMessage, SystemMessage, AIMessage
+            lc_msgs = [SystemMessage(content=system_prompt)]
+            for msg in chat_history:
+                if msg["role"] == "user":
+                    lc_msgs.append(HumanMessage(content=msg["content"]))
+                else:
+                    lc_msgs.append(AIMessage(content=msg["content"]))
+            lc_msgs.append(HumanMessage(content=text))
+            
+            # Direct invocation without AgentExecutor
+            res = chat_model.invoke(lc_msgs)
+            return res.content
             
         result = await asyncio.to_thread(run_agent)
-        return result["output"]
+        return result
     except Exception as e:
-        print(f"Langchain Agent Error: {e}")
+        print(f"Langchain Invoke Error: {e}")
         return None
 
 # -------------- The 3 Agents --------------
