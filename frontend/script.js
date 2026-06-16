@@ -152,7 +152,13 @@ function appendBubble(containerId, role, text) {
     const box = document.getElementById(containerId);
     const div = document.createElement('div');
     div.className = `chat-bubble chat-${role}`;
-    div.innerHTML = text.replace(/\n/g, '<br>');
+    
+    if (role === 'assistant') {
+        div.innerHTML = marked.parse(text);
+    } else {
+        div.innerHTML = text.replace(/\n/g, '<br>');
+    }
+    
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
 }

@@ -9,7 +9,7 @@ from langchain.tools import tool
 
 from .mcp_server import list_tools as mcp_list_tools, call_tool as mcp_call_tool
 
-MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-7B-Instruct")
+MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-14B-Instruct")
 
 # Lazy Loaded Native AMD ROCm Pipeline
 _tokenizer = None
@@ -124,7 +124,10 @@ async def _run_langchain_agent(system_prompt, tools, chat_history, text):
 async def customer_agent_flow(complaint_id: int, text: str, project_name: str, chat_history: list):
     """Handles direct customer chat."""
     tools = [lc_check_ticket_status, lc_search_knowledge_base]
-    system_prompt = f"You are a Customer Agent for {project_name}. If the user asks for ticket updates, use lc_check_ticket_status with ID {complaint_id}. If they have an issue, use lc_search_knowledge_base."
+    system_prompt = f"""You are a Customer Agent for {project_name}. 
+If the user asks for ticket updates, use lc_check_ticket_status with ID {complaint_id}. 
+If they have an issue, use lc_search_knowledge_base to find solutions.
+CRITICAL RULE: When responding to the customer, be polite and helpful. NEVER expose internal developer instructions, API logs, backend architectures, or technical jargon to the customer. You must rephrase internal knowledge base docs into friendly, customer-facing advice."""
     
     # Try the real AMD model
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, text)
