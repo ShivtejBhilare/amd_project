@@ -308,6 +308,8 @@ Available Actions:
 7. Learn: Use lc_save_memory to save developer preferences.
 {memory_context}{ctx}
 
+CRITICAL: You CANNOT update the ticket in the database just by talking. If you want to change the ETA or Status, you MUST output ONLY the JSON block to trigger the tool. Saying "I updated it" does nothing. 
+
 If you need to use a tool, you MUST output ONLY a JSON object in this format:
 ```json
 {{"tool": "tool_name", "args": {{"arg_name": "value"}}}}
@@ -337,7 +339,8 @@ If you do not need to use a tool, output your response directly as normal text."
                 chat_history.append({"role": "assistant", "content": reply})
                 reply2 = await _run_langchain_agent(system_prompt, tools, chat_history, tool_msg)
                 return {"status": "success", "reply": reply2}
-        except:
+        except Exception as e:
+            print(f"Failed to parse copilot tool JSON: {e}")
             pass # Not a valid tool call JSON, just return the text
             
         return {"status": "success", "reply": reply}

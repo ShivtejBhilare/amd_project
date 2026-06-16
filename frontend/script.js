@@ -167,6 +167,9 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Refresh timeline in case Copilot updated the ETA
             openDevTimeline(activeDevTicketId, document.getElementById('modal-ticket-title').textContent.split(' - ')[1]);
+            
+            // Also refresh the Kanban board in the background
+            loadKanban();
         } catch(e) { removeLoading('modal-copilot-history'); }
     });
 
