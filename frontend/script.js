@@ -69,13 +69,20 @@ document.addEventListener('DOMContentLoaded', () => {
         switchView(viewCustomerChat);
         document.getElementById('chat-history').innerHTML = '';
         appendBubble('chat-history', 'user', text);
+        showLoading('chat-history');
         
-        const res = await fetch(`${API_BASE}/complaints`, { method: 'POST', body: fd });
-        const data = await res.json();
-        activeComplaintId = data.complaint_id;
-        document.getElementById('active-ticket-id').textContent = `#${activeComplaintId}`;
-        appendBubble('chat-history', 'assistant', data.agent_reply);
-        fetchMyTickets();
+        try {
+            const res = await fetch(`${API_BASE}/complaints`, { method: 'POST', body: fd });
+            const data = await res.json();
+            activeComplaintId = data.complaint_id;
+            document.getElementById('active-ticket-id').textContent = `#${activeComplaintId}`;
+            removeLoading('chat-history');
+            appendBubble('chat-history', 'assistant', data.agent_reply);
+            fetchMyTickets();
+        } catch (e) {
+            removeLoading('chat-history');
+            appendBubble('chat-history', 'assistant', "Connection error.");
+        }
     });
 
     // Follow-up Chat
@@ -90,10 +97,16 @@ document.addEventListener('DOMContentLoaded', () => {
         fd.append('complaint_id', activeComplaintId);
         fd.append('text', text);
 
-        const res = await fetch(`${API_BASE}/chat`, { method: 'POST', body: fd });
-        const data = await res.json();
-        appendBubble('chat-history', 'assistant', data.agent_reply);
-        fetchMyTickets(); // Refresh statuses
+        showLoading('chat-history');
+        try {
+            const res = await fetch(`${API_BASE}/chat`, { method: 'POST', body: fd });
+            const data = await res.json();
+            removeLoading('chat-history');
+            appendBubble('chat-history', 'assistant', data.agent_reply);
+            fetchMyTickets(); // Refresh statuses
+        } catch (e) {
+            removeLoading('chat-history');
+        }
     });
 
     // Global Copilot Chat
@@ -107,9 +120,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const fd = new FormData();
         fd.append('query', text);
 
-        const res = await fetch(`${API_BASE}/developer_chat`, { method: 'POST', body: fd });
-        const data = await res.json();
-        appendBubble('copilot-history', 'assistant', data.reply);
+        showLoading('copilot-history');
+        try {
+            const res = await fetch(`${API_BASE}/developer_chat`, { method: 'POST', body: fd });
+            const data = await res.json();
+            removeLoading('copilot-history');
+            appendBubble('copilot-history', 'assistant', data.reply);
+        } catch(e) { removeLoading('copilot-history'); }
     });
 
     // Modal Ticket Copilot Chat
@@ -129,12 +146,16 @@ document.addEventListener('DOMContentLoaded', () => {
             fd.append('ticket_id', activeDevTicketId);
         }
 
-        const res = await fetch(`${API_BASE}/developer_chat`, { method: 'POST', body: fd });
-        const data = await res.json();
-        appendBubble('modal-copilot-history', 'assistant', data.reply);
-        
-        // Refresh timeline in case Copilot updated the ETA
-        openDevTimeline(activeDevTicketId, document.getElementById('modal-ticket-title').textContent.split(' - ')[1]);
+        showLoading('modal-copilot-history');
+        try {
+            const res = await fetch(`${API_BASE}/developer_chat`, { method: 'POST', body: fd });
+            const data = await res.json();
+            removeLoading('modal-copilot-history');
+            appendBubble('modal-copilot-history', 'assistant', data.reply);
+            
+            // Refresh timeline in case Copilot updated the ETA
+            openDevTimeline(activeDevTicketId, document.getElementById('modal-ticket-title').textContent.split(' - ')[1]);
+        } catch(e) { removeLoading('modal-copilot-history'); }
     });
 
     // Dashboard
@@ -187,6 +208,21 @@ function appendBubble(containerId, role, text) {
     
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
+}
+
+function showLoading(containerId) {
+    const box = document.getElementById(containerId);
+    const div = document.createElement('div');
+    div.className = 'chat-bubble chat-assistant loading-bubble';
+    div.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+    div.id = `loading-${containerId}`;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+}
+
+function removeLoading(containerId) {
+    const loader = document.getElementById(`loading-${containerId}`);
+    if (loader) loader.remove();
 }
 
 async function fetchMyTickets() {
