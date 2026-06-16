@@ -3,17 +3,13 @@ import json
 import asyncio
 import torch
 
-# D drive likely has more space, C drive is out of memory/disk!
-os.environ["HF_HOME"] = "D:\\amd\\hf_cache"
-
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
 from langchain.tools import tool
 
 from .mcp_server import list_tools as mcp_list_tools, call_tool as mcp_call_tool
 
-# Upgrading to larger parameters as requested
-MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-14B-Instruct")
+MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2-7B-Instruct")
 
 # Lazy Loaded Native AMD ROCm Pipeline
 _tokenizer = None
@@ -47,8 +43,9 @@ async def get_chat_model():
                 model=model,
                 tokenizer=tokenizer,
                 max_new_tokens=512,
-                return_full_text=False,
-                temperature=0.1
+                max_length=None,
+                temperature=0.1,
+                return_full_text=False
             )
             llm = HuggingFacePipeline(pipeline=text_pipeline)
             return ChatHuggingFace(llm=llm, model_id=MODEL_ID)
