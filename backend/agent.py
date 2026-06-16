@@ -294,27 +294,43 @@ async def developer_agent_flow(query: str, chat_history: list = [], history_text
     tools = [lc_search_developer_docs, lc_search_knowledge_base, lc_update_ticket_status, lc_update_ticket_eta, lc_request_client_info, lc_save_memory, lc_recall_memory, lc_get_dashboard_stats]
     ctx = f"\nYou are currently viewing Ticket #{ticket_id}. Customer Timeline:\n{history_text}\n" if ticket_id else ""
     
+    if ticket_id:
+        try:
+            from .database import SessionLocal, Complaint
+            db = SessionLocal()
+            comp = db.query(Complaint).filter(Complaint.id == ticket_id).first()
+            if comp:
+                ctx += f"\nTicket Status: {comp.status}\nTicket ETA: {comp.eta}\nTicket Priority: {comp.priority}\nTicket Category: {comp.predicted_category}\n"
+            db.close()
+        except Exception as e:
+            print("Failed to get ticket info", e)
+    
     memory_res = await mcp_call_tool("recall_memory", {"agent_type": "copilot"})
     memory_context = f"\nYour Saved Dev Preferences & Notes:\n{memory_res[0].text}\n" if "No memories" not in memory_res[0].text else ""
     
     system_prompt = f"""You are a Developer AI Copilot.
-Available Actions:
-1. Search docs: use lc_search_developer_docs to help the developer.
-2. Search SRS Knowledge Base: use lc_search_knowledge_base to check the project requirements (pass 'project_name').
-3. Update Status: use lc_update_ticket_status to change the ticket status (e.g. 'IN PROGRESS', 'RESOLVED').
-4. Update ETA: use lc_update_ticket_eta to change the ticket ETA.
-5. Request Info from Client: If the developer asks you to get more information from the client, you MUST use the lc_request_client_info tool.
-6. View Dashboard Stats: Use lc_get_dashboard_stats to fetch pending tickets, priorities, and idle developers.
-7. Learn: Use lc_save_memory to save developer preferences.
-{memory_context}{ctx}
+Available Tools:
+1. lc_search_developer_docs - Search developer documentation. Args: {{"query": "string"}}
+2. lc_search_knowledge_base - Check project requirements. Args: {{"project_name": "string"}}
+3. lc_update_ticket_status - Change ticket status. Args: {{"complaint_id": int, "new_status": "string", "developer_message": "string"}}
+4. lc_update_ticket_eta - Change ticket ETA. Args: {{"complaint_id": int, "new_eta": "string", "developer_message": "string"}}
+5. lc_request_client_info - Ask client for more info. Args: {{"complaint_id": int, "developer_question": "string"}}
+6. lc_get_dashboard_stats - Fetch pending tickets/idle devs. Args: {{}}
+7. lc_save_memory - Save preferences. Args: {{"agent_type": "copilot", "memory_key": "string", "memory_value": "string"}}
 
-CRITICAL: You CANNOT update the ticket in the database just by talking. If you want to change the ETA or Status, you MUST output ONLY the JSON block to trigger the tool. Saying "I updated it" does nothing. 
+To use a tool, you MUST use the following format exactly:
 
-If you need to use a tool, you MUST output ONLY a JSON object in this format:
-```json
-{{"tool": "tool_name", "args": {{"arg_name": "value"}}}}
-```
-If you do not need to use a tool, output your response directly as normal text."""
+Thought: I need to use a tool to fulfill this request.
+Action: <tool_name>
+Action Input: <json_arguments>
+
+Example:
+Thought: The developer wants to update the ETA to 2 hours.
+Action: lc_update_ticket_eta
+Action Input: {{"complaint_id": {ticket_id if ticket_id else 123}, "new_eta": "2 hours", "developer_message": "Need more time to debug"}}
+
+If you do not need to use a tool, just answer normally without "Thought" or "Action".
+{memory_context}{ctx}"""
 
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, query)
     
@@ -322,14 +338,31 @@ If you do not need to use a tool, output your response directly as normal text."
         # Check if the LLM outputted a tool call
         try:
             import re
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
-            clean_reply = json_match.group(1).strip() if json_match else reply.strip()
-            data = json.loads(clean_reply)
+            import json
             
-            if "tool" in data and "args" in data:
-                tool_name = data["tool"]
-                args = data["args"]
-                # Map lc_ prefixes if they exist
+            tool_name = None
+            args = None
+            
+            # Try ReAct format first
+            action_match = re.search(r'Action:\s*(.*?)\n.*?Action Input:\s*(.*)', reply, re.IGNORECASE | re.DOTALL)
+            if action_match:
+                tool_name = action_match.group(1).strip()
+                args_str = action_match.group(2).strip()
+                args_str = args_str.replace("```json", "").replace("```", "").strip()
+                json_block_match = re.search(r'(\{.*?\})', args_str, re.DOTALL)
+                if json_block_match:
+                    args_str = json_block_match.group(1)
+                args = json.loads(args_str)
+            else:
+                # Fallback to pure JSON block format
+                json_match = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group(1).strip())
+                    if "tool" in data and "args" in data:
+                        tool_name = data["tool"]
+                        args = data["args"]
+                        
+            if tool_name and args is not None:
                 mcp_tool_name = tool_name.replace("lc_", "")
                 res = await mcp_call_tool(mcp_tool_name, args)
                 tool_output = res[0].text
