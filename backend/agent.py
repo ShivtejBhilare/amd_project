@@ -9,7 +9,7 @@ from langchain.tools import tool
 
 from .mcp_server import list_tools as mcp_list_tools, call_tool as mcp_call_tool
 
-MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2-7B-Instruct")
+MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen2.5-7B-Instruct")
 
 # Lazy Loaded Native AMD ROCm Pipeline
 _tokenizer = None
