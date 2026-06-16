@@ -72,17 +72,29 @@ async def list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
-            name="update_ticket",
-            description="Developer Copilot tool: Update the ETA and status of a ticket and leave a message for the customer timeline.",
+            name="update_ticket_status",
+            description="Developer Copilot tool: Update the status of a ticket (e.g., 'IN PROGRESS', 'RESOLVED') and leave a message for the customer.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "complaint_id": {"type": "integer"},
+                    "new_status": {"type": "string", "description": "Update the status to 'IN PROGRESS', 'RESOLVED', etc."},
+                    "developer_message": {"type": "string", "description": "Message explaining the status change to the customer"}
+                },
+                "required": ["complaint_id", "new_status", "developer_message"]
+            }
+        ),
+        types.Tool(
+            name="update_ticket_eta",
+            description="Developer Copilot tool: Update the ETA of a ticket and leave a message for the customer timeline.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "complaint_id": {"type": "integer"},
                     "new_eta": {"type": "string", "description": "The new estimated time to resolution (e.g. '2 days')"},
-                    "new_status": {"type": "string", "description": "Update the status to 'IN PROGRESS', 'RESOLVED', etc."},
-                    "developer_message": {"type": "string", "description": "Message explaining the delay or update to the customer"}
+                    "developer_message": {"type": "string", "description": "Message explaining the ETA delay or change to the customer"}
                 },
-                "required": ["complaint_id", "new_eta", "new_status", "developer_message"]
+                "required": ["complaint_id", "new_eta", "developer_message"]
             }
         ),
         types.Tool(
@@ -201,20 +213,29 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 res = "GitHub Issues: No known open issues for this. Check server logs."
             return [types.TextContent(type="text", text=res)]
             
-        elif name == "update_ticket":
+        elif name == "update_ticket_status":
+            comp_id = arguments.get("complaint_id")
+            comp = db.query(Complaint).filter(Complaint.id == comp_id).first()
+            if not comp: return [types.TextContent(type="text", text="Complaint not found.")]
+            
+            comp.status = arguments.get("new_status")
+            msg = f"Developer Status Update: {arguments.get('developer_message')}"
+            interaction = Interaction(customer_id=comp.customer_id, complaint_id=comp.id, role="assistant", content=msg, timestamp=datetime.utcnow())
+            db.add(interaction)
+            db.commit()
+            return [types.TextContent(type="text", text=f"Ticket {comp.id} successfully updated. Status is now {comp.status}.")]
+            
+        elif name == "update_ticket_eta":
             comp_id = arguments.get("complaint_id")
             comp = db.query(Complaint).filter(Complaint.id == comp_id).first()
             if not comp: return [types.TextContent(type="text", text="Complaint not found.")]
             
             comp.eta = arguments.get("new_eta")
-            comp.status = arguments.get("new_status", comp.status)
-            
-            msg = f"Developer Update: {arguments.get('developer_message')}"
+            msg = f"Developer ETA Update: {arguments.get('developer_message')}"
             interaction = Interaction(customer_id=comp.customer_id, complaint_id=comp.id, role="assistant", content=msg, timestamp=datetime.utcnow())
             db.add(interaction)
             db.commit()
-            
-            return [types.TextContent(type="text", text=f"Ticket {comp.id} successfully updated. ETA is now {comp.eta}. Status is {comp.status}. Message added to timeline.")]
+            return [types.TextContent(type="text", text=f"Ticket {comp.id} successfully updated. ETA is now {comp.eta}.")]
 
         elif name == "request_client_info":
             comp_id = arguments.get("complaint_id")
