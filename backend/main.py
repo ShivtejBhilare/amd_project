@@ -6,9 +6,9 @@ import base64
 import os
 
 from .database import SessionLocal, init_db, Complaint, Customer, Employee, Project, Interaction
-from .agent import process_complaint_with_agent
+from .agent import customer_agent_flow, supervisor_agent_flow, developer_agent_flow
 
-app = FastAPI(title="AMD CX Routing Engine")
+app = FastAPI(title="AMD Multi-Agent CX Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,48 +34,28 @@ async def create_complaint(
     text: str = Form(...),
     customer_id: int = Form(...),
     project_id: int = Form(...),
-    image: UploadFile = File(None),
     db: Session = Depends(get_db)
 ):
-    image_b64 = None
-    if image:
-        contents = await image.read()
-        image_b64 = base64.b64encode(contents).decode('utf-8')
-    
     project = db.query(Project).filter(Project.id == project_id).first()
     project_name = project.name if project else "Unknown"
     
-    complaint = Complaint(
-        customer_id=customer_id,
-        project_id=project_id,
-        text_content=text,
-        image_path="uploaded_image" if image_b64 else None
-    )
+    complaint = Complaint(customer_id=customer_id, project_id=project_id, text_content=text)
     db.add(complaint)
     db.commit()
     db.refresh(complaint)
     
-    # Save initial user interaction
     interaction_user = Interaction(customer_id=customer_id, complaint_id=complaint.id, role="user", content=text)
     db.add(interaction_user)
     db.commit()
     
-    agent_result = await process_complaint_with_agent(
-        complaint_id=complaint.id,
-        text=text,
-        image_url=image_b64,
-        customer_id=customer_id,
-        project_name=project_name,
-        chat_history=[]
-    )
+    # 1. Customer Agent Flow
+    agent_result = await customer_agent_flow(complaint.id, text, project_name, [])
     
-    # Save agent interaction
-    if agent_result and agent_result.get("agent_reply"):
-        interaction_agent = Interaction(customer_id=customer_id, complaint_id=complaint.id, role="assistant", content=agent_result["agent_reply"])
-        db.add(interaction_agent)
-        db.commit()
+    interaction_agent = Interaction(customer_id=customer_id, complaint_id=complaint.id, role="assistant", content=agent_result["reply"])
+    db.add(interaction_agent)
+    db.commit()
     
-    return {"complaint_id": complaint.id, "agent_result": agent_result}
+    return {"complaint_id": complaint.id, "agent_reply": agent_result["reply"]}
 
 @app.post("/api/chat")
 async def send_chat(
@@ -90,30 +70,43 @@ async def send_chat(
     project = db.query(Project).filter(Project.id == complaint.project_id).first()
     project_name = project.name if project else "Unknown"
     
-    # Fetch history
     history = db.query(Interaction).filter(Interaction.complaint_id == complaint_id).order_by(Interaction.timestamp.asc()).all()
     chat_history = [{"role": i.role, "content": i.content} for i in history]
     
-    # Add user message
     user_msg = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="user", content=text)
     db.add(user_msg)
     db.commit()
     
-    agent_result = await process_complaint_with_agent(
-        complaint_id=complaint.id,
-        text=text,
-        image_url=None,
-        customer_id=complaint.customer_id,
-        project_name=project_name,
-        chat_history=chat_history
-    )
+    # 1. Customer Agent reads history and acts
+    agent_result = await customer_agent_flow(complaint.id, text, project_name, chat_history)
     
-    if agent_result and agent_result.get("agent_reply"):
-        agent_msg = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="assistant", content=agent_result["agent_reply"])
-        db.add(agent_msg)
-        db.commit()
+    # 2. If escalated, trigger Supervisor Agent in background
+    if agent_result["status"] == "escalated":
+        await supervisor_agent_flow(complaint.id, text, project_name)
+    
+    agent_msg = Interaction(customer_id=complaint.customer_id, complaint_id=complaint.id, role="assistant", content=agent_result["reply"])
+    db.add(agent_msg)
+    db.commit()
         
-    return {"status": "success", "agent_reply": agent_result.get("agent_reply")}
+    return {"status": "success", "agent_reply": agent_result["reply"]}
+
+@app.post("/api/developer_chat")
+async def dev_chat(query: str = Form(...)):
+    # Developer Copilot Agent Flow
+    result = await developer_agent_flow(query)
+    return {"reply": result["reply"]}
+
+@app.get("/api/customer/tickets/{customer_id}")
+def get_customer_tickets(customer_id: int, db: Session = Depends(get_db)):
+    complaints = db.query(Complaint).filter(Complaint.customer_id == customer_id).order_by(Complaint.created_at.desc()).all()
+    results = []
+    for c in complaints:
+        proj_name = c.project.name if c.project else "Unknown"
+        results.append({
+            "id": c.id, "project_name": proj_name, "status": c.status, 
+            "priority": c.priority, "eta": c.eta, "text": c.text_content
+        })
+    return results
 
 @app.get("/api/dashboard/complaints")
 def get_complaints(db: Session = Depends(get_db)):
@@ -123,15 +116,9 @@ def get_complaints(db: Session = Depends(get_db)):
         emp_name = c.assigned_employee.name if c.assigned_employee else None
         proj_name = c.project.name if c.project else "Unknown"
         results.append({
-            "id": c.id,
-            "project_name": proj_name,
-            "text": c.text_content,
-            "priority": c.priority,
-            "category": c.predicted_category,
-            "assigned_employee": emp_name,
-            "status": c.status,
-            "suggested_action": c.suggested_action,
-            "created_at": c.created_at
+            "id": c.id, "project_name": proj_name, "text": c.text_content,
+            "priority": c.priority, "assigned_employee": emp_name,
+            "status": c.status, "eta": c.eta
         })
     return results
 
@@ -142,17 +129,14 @@ def get_timeline(ticket_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/customers")
 def get_customers(db: Session = Depends(get_db)):
-    customers = db.query(Customer).all()
-    return [{"id": c.id, "name": c.name, "tier": c.tier} for c in customers]
+    return [{"id": c.id, "name": c.name} for c in db.query(Customer).all()]
 
 @app.get("/api/projects")
 def get_projects(db: Session = Depends(get_db)):
-    projects = db.query(Project).all()
-    return [{"id": p.id, "name": p.name} for p in projects]
+    return [{"id": p.id, "name": p.name} for p in db.query(Project).all()]
 
 @app.get("/api/employees")
 def get_employees(db: Session = Depends(get_db)):
-    employees = db.query(Employee).all()
-    return [{"id": e.id, "name": e.name, "specialty": e.specialty} for e in employees]
+    return [{"id": e.id, "name": e.name, "specialty": e.specialty} for e in db.query(Employee).all()]
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

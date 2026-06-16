@@ -44,10 +44,18 @@ body {
 
 .nav-btn {
     background: transparent; border: none; color: var(--text-muted); padding: 1rem; width: 100%;
-    text-align: left; font-size: 1rem; font-weight: 600; cursor: pointer; border-radius: 8px; transition: 0.3s;
+    text-align: left; font-size: 1rem; font-weight: 600; cursor: pointer; border-radius: 8px; transition: 0.3s; margin-bottom: 5px;
 }
 .nav-btn:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-main); }
 .nav-btn.active { background: rgba(237, 28, 36, 0.15); color: var(--primary-color); border-left: 3px solid var(--primary-color); }
+
+.tickets-sidebar-list { display: flex; flex-direction: column; gap: 5px; padding: 0 1rem; }
+.sidebar-ticket {
+    background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;
+    border: 1px solid transparent; transition: 0.2s;
+}
+.sidebar-ticket:hover { background: rgba(255,255,255,0.1); border-color: var(--border-color); }
+.sidebar-ticket.active { border-left: 3px solid var(--primary-color); background: rgba(237, 28, 36, 0.1); }
 
 /* Main Content */
 .main-content { flex: 1; padding: 2.5rem 4rem; overflow-y: auto; }
@@ -59,7 +67,7 @@ header p { color: var(--text-muted); font-size: 1rem; }
 .view-section.active { display: block; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-.card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; backdrop-filter: blur(12px); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2); }
+.card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; backdrop-filter: blur(12px); }
 .form-group { margin-bottom: 1.5rem; }
 label { display: block; margin-bottom: 0.5rem; font-weight: 600; color: #E0E0E0; }
 input, select, textarea { width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.8rem 1rem; color: var(--text-main); font-size: 1rem; }

@@ -8,84 +8,86 @@ MODEL_NAME = os.getenv("MODEL_NAME", "llava-1.5-7b-hf")
 
 client = AsyncOpenAI(api_key="EMPTY", base_url=VLLM_BASE_URL)
 
-async def process_complaint_with_agent(complaint_id: int, text: str, image_url: str = None, customer_id: int = None, project_name: str = None, chat_history: list = None):
-    if chat_history is None:
-        chat_history = []
-        
-    mcp_tools = await mcp_list_tools()
-    
-    openai_tools = []
-    for t in mcp_tools:
-        openai_tools.append({
-            "type": "function",
-            "function": {
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.inputSchema
-            }
-        })
-        
-    system_prompt = f"""You are an intelligent Customer Experience (CX) Routing Engine.
-Your job is to analyze customer complaints for the project: {project_name}.
-
-You have a conversational memory. Review the chat history. 
-1. Use the `search_knowledge_base` tool to look up the SRS for {project_name}.
-2. Check if the issue can be solved by simple troubleshooting steps from the knowledge base.
-3. If the customer is trying the steps for the first time, provide them and DO NOT route to an engineer.
-4. If the customer indicates the steps did not work, or the issue is inherently hardware/complex, you MUST use the `route_complaint` tool to escalate it.
-Valid priorities: LOW, MEDIUM, HIGH, CRITICAL.
-Valid specialties: GPU Drivers, Thermal Management, Hardware Replacements, CPU Performance.
-"""
-    
+async def _call_llm(system_prompt, chat_history, text, tools):
     messages = [{"role": "system", "content": system_prompt}]
-    
     for msg in chat_history:
         messages.append({"role": msg["role"], "content": msg["content"]})
-        
-    content = [{"type": "text", "text": text}]
-    if image_url:
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_url}"}})
-        
-    messages.append({"role": "user", "content": content})
+    messages.append({"role": "user", "content": [{"type": "text", "text": text}]})
     
     try:
         response = await client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            tools=openai_tools,
-            tool_choice="auto"
+            model=MODEL_NAME, messages=messages, tools=tools, tool_choice="auto"
         )
-        
-        message = response.choices[0].message
-        
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                function_name = tool_call.function.name
-                arguments = json.loads(tool_call.function.arguments)
-                print(f"Executing MCP Tool: {function_name} with args: {arguments}")
-                result = await mcp_call_tool(function_name, arguments)
-                
-                if function_name == "search_knowledge_base":
-                    return {"status": "success", "routing_details": None, "agent_reply": f"Based on our knowledge base: {result[0].text[:300]}...", "action": "RESOLVED"}
-                elif function_name == "route_complaint":
-                    return {"status": "success", "routing_details": arguments, "agent_reply": message.content, "action": "ROUTED"}
-        
-        return {"status": "success", "agent_reply": message.content, "routing_details": None, "action": "RESOLVED"}
+        return response.choices[0].message
     except Exception as e:
-        print(f"Error calling vLLM (using mock fallback): {e}")
-        
-        # MOCK RAG / CONVERSATION FALLBACK
-        if len(chat_history) > 0:
-            mock_args = {
-                "complaint_id": complaint_id,
-                "specialty_required": "Thermal Management" if "ryzen" in str(project_name).lower() else "GPU Drivers",
-                "priority": "HIGH",
-                "category": "Escalated Issue",
-                "suggested_action": "Customer tried self-service. Escalate to engineer."
-            }
-            await mcp_call_tool("route_complaint", mock_args)
-            return {"status": "success", "routing_details": mock_args, "agent_reply": "Since those steps didn't work, I have escalated this to an expert engineer who will review the complete history.", "action": "ROUTED"}
+        print(f"LLM Error: {e}")
+        return None
+
+async def customer_agent_flow(complaint_id: int, text: str, project_name: str, chat_history: list):
+    """Handles direct customer chat."""
+    mcp_tools = await mcp_list_tools()
+    tools = [{"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.inputSchema}} for t in mcp_tools if t.name in ["search_knowledge_base", "check_ticket_status"]]
+    
+    system_prompt = f"You are a Customer Agent for {project_name}. Use search_knowledge_base. If they ask for an update, use check_ticket_status."
+    
+    msg = await _call_llm(system_prompt, chat_history, text, tools)
+    
+    # Mock Fallback logic
+    if not msg or not msg.tool_calls:
+        if "update" in text.lower() or "status" in text.lower():
+            res = await mcp_call_tool("check_ticket_status", {"complaint_id": complaint_id})
+            return {"status": "success", "reply": f"Checking on your ticket: {res[0].text}"}
+        elif len(chat_history) > 0 and ("not work" in text.lower() or "didn't" in text.lower() or "still" in text.lower()):
+            return {"status": "escalated", "reply": "I see the steps didn't work. I am escalating this to my Supervisor immediately."}
         else:
-            srs_snippet = "Download the AMD Cleanup Utility and reinstall WHQL drivers" if "radeon" in str(project_name).lower() else "Check AIO pump or enable Memory Context Restore"
-            reply = f"Based on the {project_name} documentation: {srs_snippet}. Please try this and let me know if it helps."
-            return {"status": "success", "routing_details": None, "agent_reply": reply, "action": "RESOLVED"}
+            res = await mcp_call_tool("search_knowledge_base", {"project_name": project_name})
+            return {"status": "success", "reply": f"Based on our docs for {project_name}:\n{res[0].text[:300]}..."}
+            
+    # Handle real tool calls
+    for tc in msg.tool_calls:
+        args = json.loads(tc.function.arguments)
+        if tc.function.name == "check_ticket_status":
+            res = await mcp_call_tool("check_ticket_status", args)
+            return {"status": "success", "reply": f"Ticket Update: {res[0].text}"}
+        elif tc.function.name == "search_knowledge_base":
+            res = await mcp_call_tool("search_knowledge_base", args)
+            return {"status": "success", "reply": f"Here is what I found: {res[0].text[:300]}"}
+            
+    return {"status": "success", "reply": msg.content}
+
+async def supervisor_agent_flow(complaint_id: int, text: str, project_name: str):
+    """Assigns the ticket and sets priority/eta in the background."""
+    # Mock intelligent routing logic based on text
+    if "security" in text.lower() or "2fa" in text.lower() or "bypass" in text.lower():
+        specialty = "Security Analyst"
+        priority = "CRITICAL"
+        eta = "1 hour"
+    elif "db" in text.lower() or "query" in text.lower() or "database" in text.lower():
+        specialty = "Database Admin"
+        priority = "HIGH"
+        eta = "4 hours"
+    elif "timeout" in text.lower() or "backend" in text.lower() or "upload" in text.lower() or "s3" in text.lower():
+        specialty = "Backend Developer"
+        priority = "HIGH"
+        eta = "24 hours"
+    else:
+        specialty = "Frontend Developer"
+        priority = "MEDIUM"
+        eta = "2 days"
+        
+    args = {
+        "complaint_id": complaint_id,
+        "specialty_required": specialty,
+        "priority": priority,
+        "eta": eta,
+        "category": "Escalated to Engineering",
+        "suggested_action": "Review chat history and implement fix."
+    }
+    
+    await mcp_call_tool("route_complaint", args)
+    return {"status": "routed", "details": args}
+
+async def developer_agent_flow(query: str):
+    """Copilot for developers."""
+    res = await mcp_call_tool("search_developer_docs", {"query": query})
+    return {"status": "success", "reply": f"**Dev Copilot found:**\n{res[0].text}"}

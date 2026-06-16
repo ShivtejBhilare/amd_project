@@ -1,6 +1,5 @@
 import mcp.types as types
 from mcp.server import Server
-from pydantic import AnyUrl
 import json
 import os
 from .database import SessionLocal, Complaint, Customer, Employee, Project
@@ -11,40 +10,52 @@ app = Server("cx-routing-mcp")
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
-            name="fetch_customer_history",
-            description="Fetch past complaints and interactions for a given customer ID.",
+            name="check_ticket_status",
+            description="Fetch the status, priority, and ETA for a given complaint ID.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "customer_id": {"type": "integer", "description": "The ID of the customer"}
+                    "complaint_id": {"type": "integer"}
                 },
-                "required": ["customer_id"]
+                "required": ["complaint_id"]
             }
         ),
         types.Tool(
             name="route_complaint",
-            description="Route a complaint to an available engineer based on their specialty.",
+            description="Supervisor tool: Route a complaint to an available engineer based on specialty, set priority and ETA.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "complaint_id": {"type": "integer"},
-                    "specialty_required": {"type": "string", "description": "Specialty required (e.g. GPU Drivers, Thermal Management, Hardware Replacements, CPU Performance)"},
+                    "specialty_required": {"type": "string", "description": "e.g. Frontend Developer, Backend Developer, Database Admin, Security Analyst"},
                     "priority": {"type": "string", "description": "LOW, MEDIUM, HIGH, CRITICAL"},
-                    "category": {"type": "string", "description": "Classification category"},
-                    "suggested_action": {"type": "string", "description": "Suggested next best action for the human agent to take"}
+                    "eta": {"type": "string", "description": "Estimated time to resolution (e.g., '2 hours', '1 day')"},
+                    "category": {"type": "string"},
+                    "suggested_action": {"type": "string"}
                 },
-                "required": ["complaint_id", "specialty_required", "priority", "category", "suggested_action"]
+                "required": ["complaint_id", "specialty_required", "priority", "eta", "category", "suggested_action"]
             }
         ),
         types.Tool(
             name="search_knowledge_base",
-            description="Search the dummy SRS files to find troubleshooting steps or context for a specific project.",
+            description="Search the dummy software SRS files to find troubleshooting steps.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_name": {"type": "string", "description": "Name of the project (e.g. Ryzen, Radeon, Adrenalin)"}
+                    "project_name": {"type": "string", "description": "e.g. Banking App, E-commerce, Healthcare"}
                 },
                 "required": ["project_name"]
+            }
+        ),
+        types.Tool(
+            name="search_developer_docs",
+            description="Mock web search / documentation search for developers.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"}
+                },
+                "required": ["query"]
             }
         )
     ]
@@ -53,21 +64,12 @@ async def list_tools() -> list[types.Tool]:
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     db = SessionLocal()
     try:
-        if name == "fetch_customer_history":
-            customer_id = arguments.get("customer_id")
-            customer = db.query(Customer).filter(Customer.id == customer_id).first()
-            if not customer:
-                return [types.TextContent(type="text", text="Customer not found.")]
-            
-            history = {"tier": customer.tier, "complaints": []}
-            for comp in customer.complaints:
-                history["complaints"].append({
-                    "id": comp.id,
-                    "status": comp.status,
-                    "category": comp.predicted_category,
-                    "created_at": str(comp.created_at)
-                })
-            return [types.TextContent(type="text", text=json.dumps(history))]
+        if name == "check_ticket_status":
+            comp = db.query(Complaint).filter(Complaint.id == arguments.get("complaint_id")).first()
+            if not comp: return [types.TextContent(type="text", text="Complaint not found.")]
+            emp_name = comp.assigned_employee.name if comp.assigned_employee else "Unassigned"
+            text = f"Status: {comp.status}, Assigned To: {emp_name}, Priority: {comp.priority}, ETA: {comp.eta}"
+            return [types.TextContent(type="text", text=text)]
             
         elif name == "route_complaint":
             comp_id = arguments.get("complaint_id")
@@ -79,6 +81,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             engineer = db.query(Employee).filter(Employee.specialty == specialty, Employee.is_available == True).first()
             
             complaint.priority = arguments.get("priority")
+            complaint.eta = arguments.get("eta")
             complaint.predicted_category = arguments.get("category")
             complaint.suggested_action = arguments.get("suggested_action")
             
@@ -86,7 +89,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 complaint.employee_id = engineer.id
                 complaint.status = "ASSIGNED"
                 db.commit()
-                return [types.TextContent(type="text", text=f"Successfully routed complaint {comp_id} to engineer {engineer.name} ({specialty}).")]
+                return [types.TextContent(type="text", text=f"Successfully routed to {engineer.name} ({specialty}).")]
             else:
                 complaint.status = "NEW"
                 db.commit()
@@ -95,19 +98,30 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         elif name == "search_knowledge_base":
             project_name = arguments.get("project_name", "").lower()
             srs_dir = os.path.join(os.path.dirname(__file__), "srs_docs")
-            found_text = "No specific SRS found for this project."
             
             target_file = None
-            if "ryzen" in project_name: target_file = "ryzen_9_7950x.md"
-            elif "radeon" in project_name or "rx" in project_name: target_file = "radeon_rx_7900.md"
-            elif "adrenalin" in project_name or "software" in project_name: target_file = "adrenalin_software.md"
+            if "banking" in project_name: target_file = "banking_app.md"
+            elif "commerce" in project_name: target_file = "ecommerce_platform.md"
+            elif "health" in project_name: target_file = "healthcare_portal.md"
             
-            if target_file:
+            if target_file and os.path.exists(os.path.join(srs_dir, target_file)):
                 with open(os.path.join(srs_dir, target_file), "r") as f:
-                    found_text = f.read()
+                    return [types.TextContent(type="text", text=f.read())]
+            return [types.TextContent(type="text", text="No specific SRS found for this project.")]
             
-            return [types.TextContent(type="text", text=found_text)]
-            
+        elif name == "search_developer_docs":
+            q = arguments.get("query", "").lower()
+            if "2fa" in q or "twilio" in q:
+                res = "StackOverflow: Make sure the Twilio phone number is verified in the console and environment variables match."
+            elif "css" in q or "checkout" in q or "align" in q:
+                res = "TailwindCSS: Ensure flex-col and justify-center are properly nested. Check for z-index overrides."
+            elif "timeout" in q or "payment" in q or "gateway" in q:
+                res = "Stripe Docs: Increase the timeout limit in your webhook handler to 30s. Respond with 200 immediately."
+            elif "upload" in q or "pdf" in q or "s3" in q:
+                res = "AWS S3: Check CORS configuration on the bucket. Allow PUT method and headers."
+            else:
+                res = "GitHub Issues: No known open issues for this. Check server logs."
+            return [types.TextContent(type="text", text=res)]
         else:
             raise ValueError(f"Unknown tool: {name}")
     finally:
