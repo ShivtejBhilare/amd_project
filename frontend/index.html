@@ -91,19 +91,17 @@
 
             <!-- Agent Dashboard View -->
             <section id="agent-view" class="view-section">
-                <header style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <h1>Developer Dashboard</h1>
-                        <p>Assigned by Supervisor Agent.</p>
-                    </div>
+                <div class="header">
+                    <h2>Developer Kanban</h2>
                     <div style="display: flex; gap: 10px; align-items: center;">
-                        <label>Logged in as:</label>
-                        <select id="employee-select" class="secondary-btn"></select>
-                        <button class="secondary-btn" id="refresh-dashboard">Refresh</button>
+                        <button id="btn-sweep-backlog" class="btn btn-primary" style="background-color: var(--priority-critical);">Sweep Backlog</button>
+                        <select id="employee-select" class="form-control" style="width: 200px;">
+                            <!-- populated by js -->
+                        </select>
+                        <button id="refresh-dashboard" class="btn btn-secondary">Refresh</button>
                     </div>
-                </header>
-                
-                <div class="dashboard-grid" id="dashboard-grid"></div>
+                </div>
+                <div class="kanban-grid" id="dashboard-grid"></div>
             </section>
 
             <!-- Dev Copilot View -->

@@ -130,6 +130,22 @@ def get_customer_tickets(customer_id: int, db: Session = Depends(get_db)):
         })
     return results
 
+@app.post("/api/admin/assign_backlog")
+async def assign_backlog(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    unassigned = db.query(Complaint).filter(Complaint.employee_id == None).all()
+    count = len(unassigned)
+    
+    async def process_backlog(tickets):
+        for comp in tickets:
+            project_name = comp.project.name if comp.project else "Unknown"
+            print(f"Sweeping Backlog: Assigning Ticket #{comp.id}")
+            await supervisor_agent_flow(comp.id, comp.text_content, project_name)
+            
+    if count > 0:
+        background_tasks.add_task(process_backlog, unassigned)
+        
+    return {"message": f"Queued {count} unassigned tickets for background routing."}
+
 @app.get("/api/dashboard/complaints")
 def get_complaints(db: Session = Depends(get_db)):
     complaints = db.query(Complaint).order_by(Complaint.created_at.desc()).all()

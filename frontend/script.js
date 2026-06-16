@@ -162,6 +162,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // Dashboard
     document.getElementById('refresh-dashboard').addEventListener('click', loadDashboard);
     document.getElementById('employee-select').addEventListener('change', loadDashboard);
+    
+    document.getElementById('btn-sweep-backlog').addEventListener('click', async () => {
+        try {
+            const res = await fetch(`${API_BASE}/admin/assign_backlog`, { method: 'POST' });
+            const data = await res.json();
+            showToast(data.message, "success");
+            // The background task is running, so we reload the dashboard immediately and maybe again after a few seconds
+            loadDashboard();
+            setTimeout(loadDashboard, 5000);
+        } catch (e) {
+            showToast("Failed to trigger backlog sweep.", "error");
+        }
+    });
 
     // Modal
     document.querySelector('.close-modal').addEventListener('click', () => {
