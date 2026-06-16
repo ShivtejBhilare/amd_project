@@ -180,10 +180,43 @@ Your roles:
 CRITICAL RULES:
 - Be polite and concise.
 - NEVER expose internal logs, backend architectures, or API details.
-- NEVER ask the customer technical questions like "check your code", "check the database", or "check the API logs". Assume the customer is non-technical!"""
+- NEVER ask the customer technical questions like "check your code", "check the database", or "check the API logs". Assume the customer is non-technical!
+
+If you need to use a tool, you MUST output ONLY a JSON object in this format:
+```json
+{{"tool": "tool_name", "args": {{"arg_name": "value"}}}}
+```
+If you do not need to use a tool, output your response directly as normal text."""
     
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, text)
+    
     if reply and not reply.startswith("LLM_ERROR:"):
+        # Check if the LLM outputted a tool call
+        try:
+            import re
+            import json
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
+            clean_reply = json_match.group(1).strip() if json_match else reply.strip()
+            data = json.loads(clean_reply)
+            
+            if "tool" in data and "args" in data:
+                tool_name = data["tool"]
+                args = data["args"]
+                # Map lc_ prefixes if they exist
+                mcp_tool_name = tool_name.replace("lc_", "")
+                res = await mcp_call_tool(mcp_tool_name, args)
+                tool_output = res[0].text
+                
+                # Re-run LLM with tool output
+                tool_msg = f"Tool '{tool_name}' returned: {tool_output}. Now answer my original request based on this."
+                chat_history.append({"role": "assistant", "content": reply})
+                reply2 = await _run_langchain_agent(system_prompt, tools, chat_history, tool_msg)
+                
+                status = "escalated" if "[RAISE_TICKET]" in reply2 else "success"
+                return {"status": status, "reply": reply2.replace("[RAISE_TICKET]", "").strip()}
+        except:
+            pass # Not a valid tool call JSON, just return the text
+            
         status = "escalated" if "[RAISE_TICKET]" in reply else "success"
         reply = reply.replace("[RAISE_TICKET]", "").strip()
         return {"status": status, "reply": reply}
@@ -210,14 +243,37 @@ Arguments:
 - suggested_action: Instructions for the developer based on the context.
 {memory_context}
 You can use lc_save_memory to save patterns or logic (e.g. "If project is Banking App, route to Security Analyst").
-Reply with a summary of your routing decision."""
+
+Reply with ONLY a JSON object in this exact format:
+{{
+  "specialty_required": "Frontend Developer",
+  "priority": "HIGH",
+  "eta": "2 hours",
+  "category": "UI Bug",
+  "suggested_action": "Fix the button alignment"
+}}
+Do NOT output any markdown or other text."""
     
     reply = await _run_langchain_agent(system_prompt, tools, [], text)
-    if reply and not reply.startswith("LLM_ERROR:"):
-        return {"status": "routed", "details": reply}
+    if not reply or reply.startswith("LLM_ERROR:"):
+        err = reply.replace("LLM_ERROR:", "").strip() if reply else "Model failed to load."
+        return {"status": "error", "details": f"Supervisor cognitive engine failed: {err}"}
         
-    err = reply.replace("LLM_ERROR:", "").strip() if reply else "Model failed to load."
-    return {"status": "error", "details": f"Supervisor cognitive engine failed: {err}"}
+    try:
+        clean_reply = reply.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_reply)
+        args = {
+            "complaint_id": complaint_id,
+            "specialty_required": data.get("specialty_required", "Backend Developer"),
+            "priority": data.get("priority", "MEDIUM"),
+            "eta": data.get("eta", "TBD"),
+            "category": data.get("category", "General"),
+            "suggested_action": data.get("suggested_action", "Investigate issue")
+        }
+        res = await mcp_call_tool("route_complaint", args)
+        return {"status": "routed", "details": res[0].text}
+    except Exception as e:
+        return {"status": "error", "details": f"Supervisor failed to parse output. Raw output: {reply}"}
 
 @tool
 async def lc_request_client_info(complaint_id: int, developer_question: str) -> str:
@@ -242,10 +298,40 @@ Available Actions:
 4. Request Info from Client: If the developer asks you to get more information from the client, you MUST use the lc_request_client_info tool.
 5. View Dashboard Stats: Use lc_get_dashboard_stats to fetch pending tickets, priorities, and idle developers.
 6. Learn: Use lc_save_memory to save developer preferences (e.g. what frameworks they use) so you can recall them later.
-{memory_context}{ctx}"""
-    
+{memory_context}{ctx}
+
+If you need to use a tool, you MUST output ONLY a JSON object in this format:
+```json
+{{"tool": "tool_name", "args": {{"arg_name": "value"}}}}
+```
+If you do not need to use a tool, output your response directly as normal text."""
+
     reply = await _run_langchain_agent(system_prompt, tools, chat_history, query)
+    
     if reply and not reply.startswith("LLM_ERROR:"):
+        # Check if the LLM outputted a tool call
+        try:
+            import re
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
+            clean_reply = json_match.group(1).strip() if json_match else reply.strip()
+            data = json.loads(clean_reply)
+            
+            if "tool" in data and "args" in data:
+                tool_name = data["tool"]
+                args = data["args"]
+                # Map lc_ prefixes if they exist
+                mcp_tool_name = tool_name.replace("lc_", "")
+                res = await mcp_call_tool(mcp_tool_name, args)
+                tool_output = res[0].text
+                
+                # Re-run LLM with tool output
+                tool_msg = f"Tool '{tool_name}' returned: {tool_output}. Now answer my original request based on this."
+                chat_history.append({"role": "assistant", "content": reply})
+                reply2 = await _run_langchain_agent(system_prompt, tools, chat_history, tool_msg)
+                return {"status": "success", "reply": reply2}
+        except:
+            pass # Not a valid tool call JSON, just return the text
+            
         return {"status": "success", "reply": reply}
     
     err = reply.replace("LLM_ERROR:", "").strip() if reply else "Model failed to load."

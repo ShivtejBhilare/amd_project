@@ -364,14 +364,18 @@ function loadDashboard() {
 }
 
 async function openDevTimeline(ticketId, projectName) {
-    activeDevTicketId = ticketId;
-    modalCopilotHistory = []; // Reset modal copilot history for new ticket
+    if (activeDevTicketId !== ticketId) {
+        activeDevTicketId = ticketId;
+        modalCopilotHistory = []; // Reset modal copilot history for new ticket
+        const copilotHistoryDiv = document.getElementById('modal-copilot-history');
+        if (copilotHistoryDiv) {
+            copilotHistoryDiv.innerHTML = '';
+            copilotHistoryDiv.style.display = 'none';
+        }
+    }
+    
     const modal = document.getElementById('timeline-modal');
     const timelineBox = document.getElementById('modal-timeline');
-    document.getElementById('modal-ticket-title').textContent = `Ticket #${ticketId} Timeline - ${projectName}`;
-    
-    document.getElementById('modal-copilot-history').innerHTML = '';
-    document.getElementById('modal-copilot-history').style.display = 'none';
     
     timelineBox.innerHTML = 'Loading...';
     modal.style.display = 'block';
