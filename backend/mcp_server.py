@@ -2,7 +2,8 @@ import mcp.types as types
 from mcp.server import Server
 import json
 import os
-from .database import SessionLocal, Complaint, Customer, Employee, Project
+from .database import SessionLocal, Complaint, Customer, Employee, Project, Interaction
+from datetime import datetime
 
 app = Server("cx-routing-mcp")
 
@@ -27,9 +28,9 @@ async def list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "complaint_id": {"type": "integer"},
-                    "specialty_required": {"type": "string", "description": "e.g. Frontend Developer, Backend Developer, Database Admin, Security Analyst"},
-                    "priority": {"type": "string", "description": "LOW, MEDIUM, HIGH, CRITICAL"},
-                    "eta": {"type": "string", "description": "Estimated time to resolution (e.g., '2 hours', '1 day')"},
+                    "specialty_required": {"type": "string"},
+                    "priority": {"type": "string"},
+                    "eta": {"type": "string"},
                     "category": {"type": "string"},
                     "suggested_action": {"type": "string"}
                 },
@@ -42,7 +43,7 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_name": {"type": "string", "description": "e.g. Banking App, E-commerce, Healthcare"}
+                    "project_name": {"type": "string"}
                 },
                 "required": ["project_name"]
             }
@@ -56,6 +57,19 @@ async def list_tools() -> list[types.Tool]:
                     "query": {"type": "string"}
                 },
                 "required": ["query"]
+            }
+        ),
+        types.Tool(
+            name="update_ticket",
+            description="Developer Copilot tool: Update the ETA of a ticket and leave a message for the customer timeline.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "complaint_id": {"type": "integer"},
+                    "new_eta": {"type": "string", "description": "The new estimated time to resolution (e.g. '2 days')"},
+                    "developer_message": {"type": "string", "description": "Message explaining the delay to the customer"}
+                },
+                "required": ["complaint_id", "new_eta", "developer_message"]
             }
         )
     ]
@@ -122,6 +136,21 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             else:
                 res = "GitHub Issues: No known open issues for this. Check server logs."
             return [types.TextContent(type="text", text=res)]
+            
+        elif name == "update_ticket":
+            comp_id = arguments.get("complaint_id")
+            comp = db.query(Complaint).filter(Complaint.id == comp_id).first()
+            if not comp: return [types.TextContent(type="text", text="Complaint not found.")]
+            
+            comp.eta = arguments.get("new_eta")
+            
+            msg = f"Developer Update: {arguments.get('developer_message')}"
+            interaction = Interaction(customer_id=comp.customer_id, complaint_id=comp.id, role="assistant", content=msg, timestamp=datetime.utcnow())
+            db.add(interaction)
+            db.commit()
+            
+            return [types.TextContent(type="text", text=f"Ticket {comp.id} successfully updated. ETA is now {comp.eta}. Message added to timeline.")]
+            
         else:
             raise ValueError(f"Unknown tool: {name}")
     finally:
