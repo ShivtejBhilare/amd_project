@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AMD CX Engine - Dual Profiles</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="logo"></div>
+                <h2>AMD CX</h2>
+            </div>
+            
+            <div class="profile-switcher">
+                <p class="section-title">PROFILE</p>
+                <div class="switcher-btns">
+                    <button id="btn-client-profile" class="switcher-btn active">Client View</button>
+                    <button id="btn-dev-profile" class="switcher-btn">Developer View</button>
+                </div>
+            </div>
+
+            <nav id="client-nav" class="nav-menu active">
+                <button class="nav-btn active" data-target="customer-view">Start Chat</button>
+            </nav>
+            
+            <nav id="dev-nav" class="nav-menu" style="display: none;">
+                <button class="nav-btn active" data-target="agent-view">Kanban Dashboard</button>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- Customer Chat View -->
+            <section id="customer-view" class="view-section active">
+                <header>
+                    <h1>Support Chat</h1>
+                    <p>AI-powered self-service and triage.</p>
+                </header>
+                
+                <!-- Ticket Setup Form -->
+                <div class="card form-card" id="ticket-setup">
+                    <form id="setup-form">
+                        <div class="form-group">
+                            <label>Who are you?</label>
+                            <select id="customer-select" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Which project?</label>
+                            <select id="project-select" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Describe your issue</label>
+                            <textarea id="initial-issue" rows="3" required placeholder="E.g., My Ryzen 9 is hitting 95C..."></textarea>
+                        </div>
+                        <button type="submit" class="primary-btn">Start Session</button>
+                    </form>
+                </div>
+
+                <!-- Chat Interface (Hidden initially) -->
+                <div class="chat-container" id="chat-interface" style="display: none;">
+                    <div class="chat-history" id="chat-history"></div>
+                    <form id="chat-form" class="chat-input-area">
+                        <input type="text" id="chat-message" placeholder="Type a follow-up message..." required>
+                        <button type="submit" class="primary-btn" style="width: auto;">Send</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Agent Dashboard View -->
+            <section id="agent-view" class="view-section">
+                <header style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h1>Developer Dashboard</h1>
+                        <p>Manage escalated tickets.</p>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <label>Logged in as:</label>
+                        <select id="employee-select" class="secondary-btn"></select>
+                        <button class="secondary-btn" id="refresh-dashboard">Refresh</button>
+                    </div>
+                </header>
+                
+                <div class="dashboard-grid" id="dashboard-grid"></div>
+            </section>
+            
+        </main>
+        
+        <!-- Timeline Modal -->
+        <div id="timeline-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2 id="modal-ticket-title">Ticket Timeline</h2>
+                <div class="chat-history" id="modal-timeline" style="margin-top: 1rem; max-height: 400px;"></div>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
