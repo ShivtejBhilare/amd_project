@@ -107,6 +107,15 @@ async def list_tools() -> list[types.Tool]:
                 },
                 "required": ["agent_type"]
             }
+        ),
+        types.Tool(
+            name="get_dashboard_stats",
+            description="Developer Copilot tool: Fetch statistics about the developer dashboard including pending tickets, ticket priorities, and idle developers.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
         )
     ]
 
@@ -232,6 +241,26 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 return [types.TextContent(type="text", text="No memories found.")]
             text = "\n".join([f"Key [{m.memory_key}]: {m.memory_value}" for m in mems])
             return [types.TextContent(type="text", text=text)]
+            
+        elif name == "get_dashboard_stats":
+            unassigned = db.query(Complaint).filter(Complaint.employee_id == None).all()
+            pending = db.query(Complaint).filter(Complaint.status.in_(["NEW", "ASSIGNED"])).all()
+            idle_devs = db.query(Employee).filter(Employee.is_available == True).all()
+            
+            stats = []
+            stats.append(f"Total Pending/Active Tickets: {len(pending)}")
+            stats.append(f"Unassigned Tickets: {len(unassigned)}")
+            
+            stats.append("\nIdle Developers:")
+            for dev in idle_devs:
+                stats.append(f"- {dev.name} ({dev.specialty})")
+                
+            stats.append("\nPending Tickets Summary:")
+            for t in pending:
+                assigned_to = t.assigned_employee.name if t.assigned_employee else "Unassigned"
+                stats.append(f"- #{t.id} [{t.priority}]: {t.text_content[:50]}... (Assigned to: {assigned_to})")
+                
+            return [types.TextContent(type="text", text="\n".join(stats))]
             
         else:
             raise ValueError(f"Unknown tool: {name}")
