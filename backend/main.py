@@ -6,7 +6,8 @@ import base64
 import os
 
 from .database import SessionLocal, init_db, Complaint, Customer, Employee, Project, Interaction
-from .agent import customer_agent_flow, supervisor_agent_flow, developer_agent_flow, get_model_status
+import asyncio
+from .agent import customer_agent_flow, supervisor_agent_flow, developer_agent_flow, get_model_status, get_chat_model
 
 app = FastAPI(title="AMD Multi-Agent CX Engine")
 
@@ -30,8 +31,10 @@ def api_status():
     return {"model_status": get_model_status()}
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()
+    # Eager-load the LLM into AMD VRAM in the background so it's ready instantly
+    asyncio.create_task(get_chat_model())
 
 @app.post("/api/complaints")
 async def create_complaint(
