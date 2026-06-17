@@ -77,7 +77,7 @@ async def lc_check_ticket_status(complaint_id: int) -> str:
 
 @tool
 async def lc_route_complaint(complaint_id: int, employee_id: int, priority: str, eta: str, category: str, suggested_action: str) -> str:
-    """Supervisor tool: Route a complaint to an available engineer, set priority and ETA."""
+    """Supervisor tool: Route a complaint to a specific engineer by ID, set priority and ETA."""
     args = {"complaint_id": complaint_id, "employee_id": employee_id, "priority": priority, "eta": eta, "category": category, "suggested_action": suggested_action}
     res = await mcp_call_tool("route_complaint", args)
     return res[0].text
@@ -241,42 +241,31 @@ async def supervisor_agent_flow(complaint_id: int, text: str, project_name: str)
     try:
         from .database import SessionLocal, Employee
         db = SessionLocal()
-        devs = db.query(Employee).filter(Employee.is_available == True).all()
-        dev_list_text = "\n".join([
-            f"ID: {d.id} | Name: {d.name} | Specialty: {d.specialty} | Active Tickets: {len([c for c in d.assigned_complaints if c.status != 'RESOLVED'])}"
-            for d in devs
-        ])
+        available_devs = db.query(Employee).filter(Employee.is_available == True).all()
+        dev_list_str = "\n".join([f"ID: {d.id} | Name: {d.name} | Specialty: {d.specialty}" for d in available_devs])
         db.close()
-    except Exception as e:
-        print("Error fetching dev list:", e)
-        dev_list_text = "No developer info available."
+    except:
+        dev_list_str = "ID: 1 | Frontend Developer\nID: 2 | Backend Developer"
     
     system_prompt = f"""You are the Supervisor Agent. A ticket has been raised for {project_name}.
 Review the entire conversation timeline of the user's issue: '{text}'.
-You MUST call the lc_route_complaint tool to assign this ticket to the BEST developer available based on the issue context and their current workload.
+You MUST assign this ticket to a specific available developer IMMEDIATELY.
 
-AVAILABLE DEVELOPERS:
-{dev_list_text}
+Available Developers:
+{dev_list_str}
 
-Arguments:
-- complaint_id: {complaint_id}
-- employee_id: The ID of the best developer for this task (e.g., 1, 2, 3...)
-- priority: Assess the intensity of the issue and assign 'LOW', 'MEDIUM', 'HIGH', or 'CRITICAL'.
-- eta: e.g., '2 hours', '1 day'
-- category: A short 2-3 word category.
-- suggested_action: Instructions for the developer based on the context.
-{memory_context}
-You can use lc_save_memory to save patterns or logic.
+To use the routing tool, you MUST use the following exact format:
 
-Reply with ONLY a JSON object in this exact format:
-{{
-  "employee_id": 1,
-  "priority": "HIGH",
-  "eta": "2 hours",
-  "category": "UI Bug",
-  "suggested_action": "Fix the button alignment"
-}}
-Do NOT output any markdown or other text."""
+Thought: I need to use a tool to route this complaint.
+Action: lc_route_complaint
+Action Input: {{"complaint_id": {complaint_id}, "employee_id": <int>, "priority": "<LOW|MEDIUM|HIGH|CRITICAL>", "eta": "<string>", "category": "<string>", "suggested_action": "<string>"}}
+
+Example:
+Thought: This issue involves SQL optimization. Charlie is the Database Admin.
+Action: lc_route_complaint
+Action Input: {{"complaint_id": {complaint_id}, "employee_id": 3, "priority": "HIGH", "eta": "2 hours", "category": "Database Issue", "suggested_action": "Check indexes on the table."}}
+
+{memory_context}"""
     
     reply = await _run_langchain_agent(system_prompt, tools, [], text)
     if not reply or reply.startswith("LLM_ERROR:"):
@@ -284,20 +273,47 @@ Do NOT output any markdown or other text."""
         return {"status": "error", "details": f"Supervisor cognitive engine failed: {err}"}
         
     try:
-        clean_reply = reply.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_reply)
-        args = {
+        import re
+        import json
+        tool_name = None
+        args = None
+        
+        # Try ReAct format first
+        action_match = re.search(r'Action:\s*(.*?)\n.*?Action Input:\s*(.*)', reply, re.IGNORECASE | re.DOTALL)
+        if action_match:
+            tool_name = action_match.group(1).strip()
+            args_str = action_match.group(2).strip()
+            args_str = args_str.replace("```json", "").replace("```", "").strip()
+            json_block_match = re.search(r'(\{.*?\})', args_str, re.DOTALL)
+            if json_block_match:
+                args_str = json_block_match.group(1)
+            args = json.loads(args_str)
+        else:
+            # Fallback to pure JSON block format
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
+            if json_match:
+                args = json.loads(json_match.group(1).strip())
+                tool_name = args.get("tool", "lc_route_complaint")
+                if "args" in args:
+                    args = args["args"]
+
+        if args is None:
+            # Maybe the raw response was JSON?
+            clean_reply = reply.replace("```json", "").replace("```", "").strip()
+            args = json.loads(clean_reply)
+
+        final_args = {
             "complaint_id": complaint_id,
-            "employee_id": data.get("employee_id", 1),
-            "priority": data.get("priority", "MEDIUM"),
-            "eta": data.get("eta", "TBD"),
-            "category": data.get("category", "General"),
-            "suggested_action": data.get("suggested_action", "Investigate issue")
+            "employee_id": args.get("employee_id", 1),
+            "priority": args.get("priority", "MEDIUM"),
+            "eta": args.get("eta", "TBD"),
+            "category": args.get("category", "General"),
+            "suggested_action": args.get("suggested_action", "Investigate issue")
         }
-        res = await mcp_call_tool("route_complaint", args)
+        res = await mcp_call_tool("route_complaint", final_args)
         return {"status": "routed", "details": res[0].text}
     except Exception as e:
-        return {"status": "error", "details": f"Supervisor failed to parse output. Raw output: {reply}"}
+        return {"status": "error", "details": f"Supervisor failed to parse output. Raw output: {reply} | Exception: {e}"}
 
 @tool
 async def lc_request_client_info(complaint_id: int, developer_question: str) -> str:

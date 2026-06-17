@@ -40,7 +40,7 @@ async def list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "complaint_id": {"type": "integer"},
-                    "employee_id": {"type": "integer", "description": "The ID of the best employee to solve this issue"},
+                    "employee_id": {"type": "integer", "description": "The exact ID of the developer to assign the ticket to"},
                     "priority": {"type": "string"},
                     "eta": {"type": "string"},
                     "category": {"type": "string"},
@@ -173,7 +173,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 db.add(interaction)
                 
                 db.commit()
-                return [types.TextContent(type="text", text=f"Successfully routed to {engineer.name}.")]
+                return [types.TextContent(type="text", text=f"Successfully routed to {engineer.name} ({engineer.specialty}).")]
             else:
                 complaint.status = "NEW"
                 
