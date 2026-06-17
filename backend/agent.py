@@ -1,4 +1,5 @@
 import os
+os.environ["HF_HOME"] = "D:\\huggingface_cache"
 import json
 import asyncio
 import torch
